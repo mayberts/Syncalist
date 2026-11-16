@@ -3,6 +3,12 @@
 Docker images: `ghcr.io/mayberts/syncalist:<version>`. `latest` follows the main branch;
 `0.5` follows the newest 0.5.x release; `0.5.0` never changes.
 
+## 0.5.2 (2026-11-16)
+
+- Shared playlists now show their real track count in each person's list, instead of Plex's
+  stored count, which can be out of date (seen: 112 shown, 107 real). Hover the number to see
+  Plex's figure when they differ.
+
 ## 0.5.1 (2026-11-16)
 
 - Playlist poster thumbnails on the playlists page, for every playlist and in the Shared

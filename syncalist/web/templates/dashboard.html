@@ -66,7 +66,12 @@
       {% for p in row.playlists %}
         <tr>
           <td><a class="pl" href="/users/{{ row.user.id }}/playlists/{{ p.key }}">{% if p.thumb %}<img class="thumb" src="/users/{{ row.user.id }}/thumb?path={{ p.thumb|urlencode }}" alt="" loading="lazy" width="36" height="36">{% else %}<span class="thumb"></span>{% endif %}<span>{{ p.title }}</span></a>{% if p.smart %} <span class="tag">smart</span>{% endif %}</td>
+          {% set m = shared.get((row.user.id, p.key)) %}
+          {% if m and m.last_known is not none %}
+          <td class="num"{% if m.last_known|length != p.track_count %} title="Plex's stored count says {{ p.track_count }}; it's out of date"{% endif %}>{{ m.last_known|length }}</td>
+          {% else %}
           <td class="num">{{ p.track_count }}</td>
+          {% endif %}
           <td class="muted">{{ p.updated_at|ago }}</td>
           <td class="num">
             {% set m = shared.get((row.user.id, p.key)) %}

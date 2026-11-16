@@ -248,3 +248,11 @@ def test_dashboard_shows_playlist_thumbnails(configured, plex):
     assert r.status_code == 200 and r.content == f"thumb:96:{poster_path}".encode()
     assert "max-age" in r.headers["cache-control"]
     assert configured.get(f"/users/{ADMIN_ID}/thumb", params={"path": "http://evil/x"}).status_code == 400
+
+
+def test_shared_playlist_shows_real_count_not_stale_plex_count(configured, plex):
+    configured.post("/share", data={"user_id": ADMIN_ID, "playlist_key": 11, "recipient": KATE_ID,
+                                    f"mode_{KATE_ID}": "replace"})
+    plex.hidden_count[11] = 112  # Plex's stored count is stale; the playlist really holds 4
+    page = configured.get("/").text
+    assert 'title="Plex\'s stored count says 112; it\'s out of date">4</td>' in page
