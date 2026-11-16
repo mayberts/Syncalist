@@ -12,14 +12,15 @@
 <section class="card">
   <h2>Shared playlists</h2>
   <table>
-    <thead><tr><th>Playlist</th><th>Shared with</th><th class="num">Tracks</th><th>Status</th></tr></thead>
+    <thead><tr><th>Playlist</th><th>Shared with</th><th class="num">Tracks</th><th>Last synced</th><th>Status</th></tr></thead>
     <tbody>
     {% for g in groups %}{% set ms = group_members[g.id] %}
       <tr>
         <td><a href="/groups/{{ g.id }}">{{ g.name }}</a></td>
         <td>{% for m in ms %}{{ names.get(m.user_id, "?") }}{{ ", " if not loop.last }}{% endfor %}</td>
         <td class="num">{{ g.base_snapshot|length }}</td>
-        <td>{% if ms|selectattr("status", "ne", "ok")|list %}<span class="bad">Problem</span>{% elif ms|selectattr("skipped")|list %}<span class="warn">Some tracks skipped</span>{% else %}<span class="ok">OK</span>{% endif %}</td>
+        <td class="muted">{{ g.last_synced_at|ago }}</td>
+        <td>{% if g.paused_reason %}<a class="bad" href="/groups/{{ g.id }}">Paused: needs you</a>{% elif ms|selectattr("status", "ne", "ok")|list %}<span class="bad">Problem</span>{% elif ms|selectattr("skipped")|list %}<span class="warn">Some tracks skipped</span>{% else %}<span class="ok">OK</span>{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>

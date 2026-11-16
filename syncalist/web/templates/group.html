@@ -5,14 +5,25 @@
 <div class="pagehead">
   <div>
     <h1>{{ group.name }} <span class="tag">shared</span></h1>
-    <p class="muted">{{ group.base_snapshot|length }} tracks · shared by {{ owner.title if owner else "unknown" }} {{ group.created_at|ago }}</p>
+    <p class="muted">{{ group.base_snapshot|length }} tracks · shared by {{ owner.title if owner else "unknown" }} {{ group.created_at|ago }} · last synced {{ group.last_synced_at|ago }}</p>
   </div>
-  <form method="post" action="/groups/{{ group.id }}/stop" onsubmit="return confirm('Stop sharing “{{ group.name }}”? Everyone keeps their own copy, but changes will no longer be shared.')">
-    <button>Stop sharing</button>
-  </form>
+  <div class="actions">
+    <form method="post" action="/groups/{{ group.id }}/sync"><button class="primary">Sync now</button></form>
+    <form method="post" action="/groups/{{ group.id }}/stop" onsubmit="return confirm('Stop sharing “{{ group.name }}”? Everyone keeps their own copy, but changes will no longer be shared.')">
+      <button>Stop sharing</button>
+    </form>
+  </div>
 </div>
 
-<div class="flash info">Changes made after sharing aren't copied between people yet. Automatic syncing comes in the next update.</div>
+{% if group.paused_reason %}
+<div class="flash error paused">
+  <p><strong>Syncing is paused for this playlist.</strong> {{ group.paused_reason }}</p>
+  <div class="actions">
+    <form method="post" action="/groups/{{ group.id }}/apply" onsubmit="return confirm('Apply these changes to everyone? Anyone losing tracks is backed up first.')"><button class="primary">Apply for everyone</button></form>
+    <form method="post" action="/groups/{{ group.id }}/undo" onsubmit="return confirm('Undo? Everyone, including whoever made the change, goes back to the last synced version.')"><button>Undo</button></form>
+  </div>
+</div>
+{% endif %}
 
 <section class="card">
   <h2>Members</h2>

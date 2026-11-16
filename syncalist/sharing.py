@@ -102,7 +102,7 @@ class ShareService:
         self.session.commit()
         self.session.refresh(group)
         owner_member = GroupMember(group_id=group.id, user_id=owner.id, playlist_key=playlist_key,
-                                   last_seen_updated_at=source.updated_at)
+                                   last_seen_updated_at=source.updated_at, last_known=dedupe(tracks))
         self.session.add(owner_member)
         self.session.commit()
         self._log(group, f"{owner.title} shared “{group.name}” ({len(group.base_snapshot)} tracks)", owner)
@@ -230,6 +230,7 @@ class ShareService:
             # Verify by reading the playlist back (Plex's stored count can be stale).
             expected = [k for k in group.base_snapshot if k not in set(skipped)]
             actual = self.users.call_as(user, lambda t: self.gateway.playlist_track_keys(t, member.playlist_key))
+            member.last_known = actual
             if actual != expected:
                 member.status = "warning"
                 member.status_detail = (f"After updating, {user.title}'s playlist has {len(actual)} tracks; "
@@ -309,10 +310,18 @@ class ShareService:
                 return p
         return None
 
-    def _backup(self, user: HomeUser, summary: PlaylistSummary, keys: list[int], reason: str) -> None:
+    def _backup(self, user: HomeUser, summary: PlaylistSummary, keys: list[int], reason: str,
+                keep: int = 10) -> None:
         self.session.add(PlaylistBackup(user_id=user.id, user_title=user.title, playlist_key=summary.key,
                                         title=summary.title, track_keys=keys, reason=reason))
         self.session.commit()
+        old = self.session.exec(select(PlaylistBackup).where(
+            PlaylistBackup.user_id == user.id, PlaylistBackup.playlist_key == summary.key)
+            .order_by(PlaylistBackup.taken_at.desc(), PlaylistBackup.id.desc()).offset(keep)).all()
+        for b in old:  # keep the newest `keep` backups per playlist
+            self.session.delete(b)
+        if old:
+            self.session.commit()
 
     def _log(self, group: ShareGroup | None, message: str, user: HomeUser | None = None,
              level: str = "info") -> None:

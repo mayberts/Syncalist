@@ -54,6 +54,8 @@ class ShareGroup(SQLModel, table=True):
     base_snapshot: list[int] = Field(default_factory=list, sa_column=Column(JSON))  # last agreed track list
     created_at: datetime = Field(default_factory=utcnow)
     last_synced_at: datetime | None = None
+    # Set when a sync was held back for confirmation (e.g. it would remove many tracks).
+    paused_reason: str | None = None
 
 
 class GroupMember(SQLModel, table=True):
@@ -65,6 +67,10 @@ class GroupMember(SQLModel, table=True):
     playlist_key: int
     last_seen_updated_at: datetime | None = None  # Plex updatedAt after our last write (echo suppression)
     skipped: list[int] = Field(default_factory=list, sa_column=Column(JSON))  # tracks this user can't access
+    # Exactly what this member's playlist held after our last write/read. Each sync diffs the
+    # member against this (not the group list), so skipped or not-yet-received tracks never
+    # look like removals. None = unknown (older installs): fall back to the group list.
+    last_known: list[int] | None = Field(default=None, sa_column=Column(JSON))
     status: str = "ok"  # ok | error
     status_detail: str | None = None
     joined_at: datetime = Field(default_factory=utcnow)

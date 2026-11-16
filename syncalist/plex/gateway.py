@@ -88,6 +88,7 @@ class Gateway(Protocol):
                             allow_removals: bool = False) -> list[int]: ...
     def debug_playlist(self, user_token: str, playlist_key: int) -> dict: ...
     def delete_playlist(self, user_token: str, playlist_key: int) -> None: ...
+    def rename_playlist(self, user_token: str, playlist_key: int, title: str) -> None: ...
     def tracks_info(self, track_keys: list[int]) -> list[Track]: ...
 
 
@@ -242,6 +243,10 @@ class PlexApiGateway:
         Unless allow_removals is set, nothing is changed if any track would be removed."""
         srv = self._user_server(user_token)
         return self._set_tracks(srv, srv.fetchItem(playlist_key), track_keys, allow_removals)
+
+    @_wrap
+    def rename_playlist(self, user_token: str, playlist_key: int, title: str) -> None:
+        self._fetch_playlist(user_token, playlist_key).editTitle(title)
 
     @_wrap
     def delete_playlist(self, user_token: str, playlist_key: int) -> None:

@@ -95,6 +95,10 @@ details.remove form { margin-top: .5rem; text-align: left; min-width: 14rem; }
 .events .when { display: inline-block; min-width: 7.5rem; font-size: .85rem; }
 .skipped { margin: .25rem 0 0; padding-left: 1.2rem; }
 
+.actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+.actions form { margin: 0; }
+.flash.paused p { margin: 0 0 .6rem; }
+
 @media (max-width: 600px) {
   .topbar nav { gap: .7rem; font-size: .9rem; }
   table.tracks th:nth-child(4), table.tracks td:nth-child(4) { display: none; }

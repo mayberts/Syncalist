@@ -83,3 +83,34 @@ def test_restore_backup(configured, plex):
 def test_debug_playlist_page(configured):
     r = configured.get(f"/debug/playlist?user_id={KATE_ID}&playlist_key=253611")
     assert r.status_code == 200 and r.json()["items()"]["count"] == 3 and "token" not in r.text.lower()
+
+
+def test_sync_now_apply_and_undo_buttons(configured, plex):
+    gid = configured.post("/share", data={"user_id": ADMIN_ID, "playlist_key": 11, "recipient": KATE_ID,
+                                          f"mode_{KATE_ID}": "replace"}).headers["location"]
+    page = configured.get(gid).text
+    assert "Sync now" in page and "aren&#39;t copied" not in page
+    plex.edit(KATE_ID, 253611, [1, 2, 3, 4, 9])
+    configured.post(f"{gid}/sync")
+    assert plex.items(ADMIN_ID, 11) == [1, 2, 3, 4, 9]
+    assert "Kate added" in configured.get(gid).text
+
+    plex.add_playlist(ADMIN_ID, "Big", list(range(1, 21)), key=50)
+    gid2 = configured.post("/share", data={"user_id": ADMIN_ID, "playlist_key": 50,
+                                           "recipient": CLEO_ID}).headers["location"]
+    cleo_key = [k for k, p in plex.playlists[CLEO_ID].items() if p["title"] == "Big"][0]
+    plex.edit(CLEO_ID, cleo_key, [1])
+    configured.post(f"{gid2}/sync")
+    page = configured.get(gid2).text
+    assert "Syncing is paused" in page and "Paused: needs you" in configured.get("/").text
+    configured.post(f"{gid2}/undo")
+    assert plex.items(CLEO_ID, cleo_key) == list(range(1, 21))
+    assert "Syncing is paused" not in configured.get(gid2).text
+
+
+def test_scheduler_round_runs_against_configured_app(configured, app, plex):
+    configured.post("/share", data={"user_id": ADMIN_ID, "playlist_key": 11, "recipient": KATE_ID,
+                                    f"mode_{KATE_ID}": "replace"})
+    plex.edit(KATE_ID, 253611, [4, 3, 2, 1])
+    app.state.run_sync_round()
+    assert plex.items(ADMIN_ID, 11) == [4, 3, 2, 1]

@@ -67,6 +67,15 @@ class FakePlex:
         self.add_playlist(KATE_ID, "Kate's favourites", [143610, 143611], key=309551)
         self.add_playlist(KATE_ID, "Road Trip", [3, 5, 6], key=253611)
 
+    def edit(self, user_id, key, items=None, title=None):
+        """Simulate a person editing their playlist in a Plex app."""
+        pl = self.playlists[user_id][key]
+        if items is not None:
+            pl["items"] = list(items)
+        if title is not None:
+            pl["title"] = title
+        pl["updated"] = self.tick()
+
     def tick(self):
         self.clock += timedelta(seconds=1)
         return self.clock
@@ -179,6 +188,11 @@ class FakeGateway:
         _, pl = self._pl(token, key)
         return {"playlist_key": key, "items()": {"count": len(pl["items"])}}
 
+    def rename_playlist(self, token, key, title):
+        _, pl = self._pl(token, key)
+        pl["title"] = title
+        pl["updated"] = self.plex.tick()
+
     def delete_playlist(self, token, key):
         uid, _ = self._pl(token, key)
         del self.plex.playlists[uid][key]
@@ -197,7 +211,8 @@ def auth():
 @pytest.fixture
 def app(tmp_path, plex, auth):
     config = Config(data_dir=tmp_path, plex_url="http://plex:32400", sync_interval=60)
-    return create_app(config, gateway_factory=lambda url, tok: FakeGateway(plex, url, tok), plex_auth=auth)
+    return create_app(config, gateway_factory=lambda url, tok: FakeGateway(plex, url, tok), plex_auth=auth,
+                      start_scheduler=False)
 
 
 @pytest.fixture

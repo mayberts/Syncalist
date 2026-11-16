@@ -1,6 +1,8 @@
 """FastAPI application: Plex sign-in, setup, and the read-only playlist views (M1)."""
 
+import threading
 import time
+from contextlib import asynccontextmanager
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +24,8 @@ from ..models import AppSettings, HomeUser, PlaylistBackup, ShareGroup
 from ..plex.auth import Pin, PlexAuth, PlexAuthError
 from ..plex.gateway import Gateway, PlexApiGateway, PlexError, TokenRejected
 from ..sharing import Mode, ShareError, ShareService
+from ..sync.engine import SyncService
+from ..sync.scheduler import Scheduler
 from ..users import UserNeedsAttention, UserService
 
 HERE = Path(__file__).parent
@@ -37,14 +41,39 @@ class Redirect(Exception):
 
 
 def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory = PlexApiGateway,
-               plex_auth: PlexAuth | None = None, db_url: str | None = None) -> FastAPI:
+               plex_auth: PlexAuth | None = None, db_url: str | None = None,
+               start_scheduler: bool = True) -> FastAPI:
     config = config or Config()
     secrets = Secrets(config.key_path)
     engine: Engine = make_engine(db_url or f"sqlite:///{config.db_path}")
     plex_auth = plex_auth or PlexAuth()
     gateways: dict[tuple[str, str], Gateway] = {}
+    sync_lock = threading.Lock()  # one sync at a time: scheduled rounds and button presses
 
-    app = FastAPI(title="Syncalist", version=__version__, docs_url=None, redoc_url=None)
+    def run_sync_round() -> None:
+        with Session(engine) as session:
+            settings = get_app_settings(session, config.sync_interval)
+            token = secrets.decrypt(settings.admin_token_enc)
+            if not settings.is_configured or not token:
+                return
+            SyncService(share_service(session, settings)).sync_all()
+
+    def current_interval() -> int:
+        with Session(engine) as session:
+            return get_app_settings(session, config.sync_interval).poll_interval
+
+    scheduler = Scheduler(run_sync_round, current_interval, sync_lock)
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        if start_scheduler:
+            scheduler.start()
+        yield
+        scheduler.stop()
+
+    app = FastAPI(title="Syncalist", version=__version__, docs_url=None, redoc_url=None, lifespan=lifespan)
+    app.state.scheduler = scheduler
+    app.state.run_sync_round = run_sync_round
     app.add_middleware(SessionMiddleware, secret_key=secrets.session_secret,
                        session_cookie="syncalist_session", max_age=30 * 24 * 3600, same_site="lax")
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
@@ -441,6 +470,40 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
             flash(request, f"Stopped sharing “{name}”. Everyone keeps their own copy.", "success")
         return RedirectResponse("/", status_code=303)
 
+    def _group_action(group_id: int, session: Session, settings: AppSettings, action) -> ShareGroup | None:
+        group = session.get(ShareGroup, group_id)
+        if group is None:
+            return None
+        with sync_lock:
+            action(SyncService(share_service(session, settings)), group)
+        return group
+
+    @app.post("/groups/{group_id}/sync")
+    async def group_sync(request: Request, group_id: int, session: Session = Depends(db),
+                         settings: AppSettings = Depends(require_admin)):
+        group = await run_in_threadpool(_group_action, group_id, session, settings,
+                                        lambda svc, g: svc.sync_group(g))
+        if group is not None:
+            flash(request, "Sync paused: needs your decision." if group.paused_reason else "Synced.",
+                  "error" if group.paused_reason else "success")
+        return RedirectResponse(f"/groups/{group_id}" if group else "/", status_code=303)
+
+    @app.post("/groups/{group_id}/apply")
+    async def group_apply(request: Request, group_id: int, session: Session = Depends(db),
+                          settings: AppSettings = Depends(require_admin)):
+        await run_in_threadpool(_group_action, group_id, session, settings,
+                                lambda svc, g: svc.sync_group(g, force=True))
+        flash(request, "Applied the changes for everyone.", "success")
+        return RedirectResponse(f"/groups/{group_id}", status_code=303)
+
+    @app.post("/groups/{group_id}/undo")
+    async def group_undo(request: Request, group_id: int, session: Session = Depends(db),
+                         settings: AppSettings = Depends(require_admin)):
+        await run_in_threadpool(_group_action, group_id, session, settings,
+                                lambda svc, g: svc.discard_pending(g))
+        flash(request, "Undone: everyone is back to the last synced version.", "success")
+        return RedirectResponse(f"/groups/{group_id}", status_code=303)
+
     @app.get("/backups", response_class=HTMLResponse)
     def backups_page(request: Request, session: Session = Depends(db),
                      settings: AppSettings = Depends(require_admin)):
@@ -490,6 +553,7 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
             settings.poll_interval = poll_interval
             session.add(settings)
             session.commit()
+            scheduler.wake()
             flash(request, f"Sync interval set to {poll_interval} seconds.", "success")
         return RedirectResponse("/settings", status_code=303)
 

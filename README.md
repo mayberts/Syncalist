@@ -6,8 +6,8 @@ the changes reach everyone.
 
 See [PLAN.md](PLAN.md) for the design.
 
-**Status: M1, read-only.** You can sign in, connect your server and browse every Home
-user's music playlists. Sharing and syncing come in M2 and M3.
+**Status: M3.** Sign in, share music playlists between Home users (merge, replace or keep
+separate), and keep them in sync automatically. Backups are taken before anything is removed.
 
 ## Install on Unraid
 

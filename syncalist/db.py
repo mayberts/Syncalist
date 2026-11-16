@@ -3,7 +3,7 @@
 import uuid
 from collections.abc import Iterator
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, inspect, text
 from sqlmodel import Session, SQLModel, create_engine
 
 from .models import AppSettings
@@ -12,7 +12,21 @@ from .models import AppSettings
 def make_engine(db_url: str) -> Engine:
     engine = create_engine(db_url, connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
+    _add_missing_columns(engine)
     return engine
+
+
+def _add_missing_columns(engine: Engine) -> None:
+    """Tiny migration: add columns introduced after a table was first created.
+    New columns are always nullable, so existing rows simply get NULL."""
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in SQLModel.metadata.sorted_tables:
+            existing = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name not in existing:
+                    coltype = col.type.compile(dialect=engine.dialect)
+                    conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {coltype}'))
 
 
 def session_scope(engine: Engine) -> Iterator[Session]:
