@@ -66,6 +66,8 @@ The merge is a **pure function** (`merge(base, {member: current_list}) -> canoni
 | Two members rename their copies between polls | The rename with the later `updatedAt` wins. Every copy gets that name. |
 | A user's token stops working | The app fetches a fresh token from the admin account automatically. If that fails, the member is marked "needs attention" and skipped, the others keep syncing, and the admin can enter that user's PIN as a fallback. |
 | Sharing an existing playlist to a new user | A new playlist is created for them with the same title, filled with the canonical list. |
+| The recipient already has a playlist with the same name | **The share dialog asks each time**, with three choices. **Merge**: link the two playlists and combine their tracks, no duplicates. **Replace**: overwrite theirs with the shared one, after a backup. **Keep separate**: leave theirs alone and create a new copy. (Seen on the real server: the admin's and Kate's "Road Trip" have 30 and 81 tracks.) |
+| Smart playlists | Shown in the UI, but can't be shared (v1 is music playlists with fixed track lists only). |
 | Stop sharing with a user | Choice in the UI: keep their copy as a normal playlist, or delete it. |
 | First sync of a group | Back up every member's playlist first, so it can be restored. |
 
@@ -114,7 +116,7 @@ The merge is a **pure function** (`merge(base, {member: current_list}) -> canoni
 | # | Milestone | Outcome |
 |---|---|---|
 | M0 | **Spike** | Script that signs in as admin, lists Home users, gets a PIN-protected user's token (with and without the PIN), then reads, writes and renames one of their playlists. ✅ **Done.** Results in section 9. |
-| M1 | Skeleton | FastAPI app, Plex sign-in, SQLite, Docker image. Lists users and their music playlists, read-only. 🟡 **Built, awaiting a test on the real server.** Still to confirm: no-PIN token writes (`plex_spike.py` now uses that token by default). |
+| M1 | Skeleton | FastAPI app, Plex sign-in, SQLite, Docker image. Lists users and their music playlists, read-only. ✅ **Running on Unraid** (`ghcr.io/mayberts/syncalist`, Unraid template in `unraid/`). All 5 Home users read without PINs. No-PIN token *writes* are still untested; they're confirmed on the first M2 share if the spike isn't re-run. |
 | M2 | One-way share | Create a share group and copy the playlist to recipients. Backups. |
 | M3 | Two-way sync | Merge engine plus planner with full unit tests, scheduler, echo suppression. |
 | M4 | UX and safety | Activity log, skipped-track warnings, leave/unshare flows, restore from backup, dry-run mode. |
