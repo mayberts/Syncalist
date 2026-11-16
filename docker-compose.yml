@@ -1,6 +1,7 @@
 services:
   syncalist:
-    build: .
+    image: ghcr.io/mayberts/syncalist:latest
+    # build: .                  # use this instead of image: to build locally
     container_name: syncalist
     ports:
       - "8585:8585"
@@ -9,5 +10,6 @@ services:
     environment:
       - PLEX_URL=http://192.168.1.36:32400   # pre-fills setup; change it in the UI later
       - SYNC_INTERVAL=60                      # initial default only; change it in the UI later
-    # The container runs as uid 1000. If ./data is owned by someone else, set user: "<uid>:<gid>".
+      - PUID=1000                             # owner of ./data on the host
+      - PGID=1000
     restart: unless-stopped

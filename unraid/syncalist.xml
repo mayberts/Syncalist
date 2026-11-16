@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Syncalist</Name>
+  <Repository>ghcr.io/mayberts/syncalist:latest</Repository>
+  <Registry>https://github.com/mayberts/Syncalist/pkgs/container/syncalist</Registry>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/mayberts/Syncalist</Support>
+  <Project>https://github.com/mayberts/Syncalist</Project>
+  <Overview>Keeps Plex Home music playlists in sync between users. The Plex Home admin chooses which playlists are shared and with whom, then any member can edit their copy and the changes reach everyone. Sign in with the Plex account that owns the server.</Overview>
+  <Category>MediaServer:Music Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8585]/</WebUI>
+  <Icon>https://raw.githubusercontent.com/mayberts/Syncalist/claude/vibrant-fermi-feca8d/unraid/icon.png</Icon>
+  <ExtraParams>--restart unless-stopped</ExtraParams>
+  <Config Name="Web UI port" Target="8585" Default="8585" Mode="tcp" Description="Port for the Syncalist web interface." Type="Port" Display="always" Required="true" Mask="false">8585</Config>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/syncalist" Mode="rw" Description="Database and encryption key. Back up both files together." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/syncalist</Config>
+  <Config Name="Plex URL" Target="PLEX_URL" Default="" Mode="" Description="Address of your Plex server, e.g. http://192.168.1.36:32400. Only pre-fills first-time setup; it can be changed in the web UI." Type="Variable" Display="always" Required="false" Mask="false">http://192.168.1.36:32400</Config>
+  <Config Name="Sync interval (seconds)" Target="SYNC_INTERVAL" Default="60" Mode="" Description="Initial sync interval. It can be changed later in the web UI." Type="Variable" Display="advanced" Required="false" Mask="false">60</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID the app runs as (99 = nobody on Unraid)." Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID the app runs as (100 = users on Unraid)." Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
+</Container>

@@ -4,5 +4,7 @@
 .pytest_cache
 *.egg-info
 spike
+unraid
+.github
 tests
 data
