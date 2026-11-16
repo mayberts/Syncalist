@@ -23,6 +23,10 @@ class ShareError(Exception):
     pass
 
 
+class ReadMismatch(ShareError):
+    """Plex's track count and the tracks actually read disagree. Never write after this."""
+
+
 class Mode(str, Enum):
     NEW = "new"  # create a new playlist for the recipient
     MERGE = "merge"  # link their same-name playlist and combine tracks
@@ -89,7 +93,7 @@ class ShareService:
         source = self._summary(owner, playlist_key)
         if source.smart:
             raise ShareError("Smart playlists can't be shared.")
-        tracks = self.users.call_as(owner, lambda t: self.gateway.playlist_track_keys(t, playlist_key))
+        tracks = self._read_keys(owner, source)
         if not tracks:
             raise ShareError("That playlist is empty. Add some tracks before sharing it.")
 
@@ -118,12 +122,55 @@ class ShareService:
         self._add(group, recipients, existing_members=current)
 
     def _add(self, group: ShareGroup, recipients: dict[int, Mode], existing_members: list[GroupMember]) -> None:
+        """Phase 1 reads and checks everything. Phase 2 writes. If any read looks wrong,
+        nothing is written at all."""
         shared = self.member_index()
-        new_members: list[GroupMember] = []
-        merged_sources: list[list[int]] = []
 
+        # -- phase 1: read and validate ------------------------------------------------------
+        plans: list[tuple[HomeUser, Mode, PlaylistSummary | None, list[int]]] = []
         for user_id, mode in recipients.items():
             user = self._user(user_id)
+            try:
+                if mode is Mode.NEW:
+                    plans.append((user, mode, None, []))
+                    continue
+                existing = self._same_name(user, group.name)
+                if existing is None:
+                    raise ShareError(f"{user.title} no longer has a playlist called “{group.name}”.")
+                if (user.id, existing.key) in shared:
+                    raise ShareError(f"{user.title}'s “{existing.title}” is already in another shared playlist.")
+                plans.append((user, mode, existing, self._read_keys(user, existing)))
+            except (UserNeedsAttention, PlexError) as e:
+                self._log(group, f"Couldn't add {user.title}: {e}", user, level="error")
+            except ReadMismatch:
+                raise  # a bad read: stop everything rather than risk losing tracks
+            except ShareError as e:
+                self._log(group, f"Couldn't add {user.title}: {e}", user, level="error")
+
+        merged_sources = [keys for _, mode, _, keys in plans if mode is Mode.MERGE]
+        existing_reads: list[tuple[GroupMember, HomeUser, PlaylistSummary, list[int]]] = []
+        if merged_sources:
+            for m in existing_members:
+                user = self._user(m.user_id)
+                summary = self._summary(user, m.playlist_key)
+                existing_reads.append((m, user, summary, self._read_keys(user, summary)))
+
+        if not plans:
+            raise ShareError("Nobody could be added. See the activity log for details.")
+
+        # -- phase 2: write ------------------------------------------------------------------------
+        for _, user, summary, keys in existing_reads:
+            self._backup(user, summary, keys, reason=f"Before merge into shared “{group.name}”")
+        if merged_sources:
+            before = len(group.base_snapshot)
+            group.base_snapshot = union(group.base_snapshot, *merged_sources)
+            self._log(group, f"Shared list now has {len(group.base_snapshot)} tracks "
+                             f"({len(group.base_snapshot) - before} added by merging)")
+            self.session.add(group)
+            self.session.commit()
+
+        new_members: list[tuple[GroupMember, bool]] = []
+        for user, mode, existing, keys in plans:
             try:
                 if mode is Mode.NEW:
                     summary = self.users.call_as(
@@ -131,55 +178,43 @@ class ShareService:
                     member = GroupMember(group_id=group.id, user_id=user.id, playlist_key=summary.key)
                     self._log(group, f"Created “{group.name}” for {user.title}", user)
                 else:
-                    existing = self._same_name(user, group.name)
-                    if existing is None:
-                        raise ShareError(f"{user.title} no longer has a playlist called “{group.name}”.")
-                    if (user.id, existing.key) in shared:
-                        raise ShareError(f"{user.title}'s “{existing.title}” is already in another shared playlist.")
-                    keys = self.users.call_as(user, lambda t: self.gateway.playlist_track_keys(t, existing.key))
                     self._backup(user, existing, keys, reason=f"Before {mode.value} into shared “{group.name}”")
-                    if mode is Mode.MERGE:
-                        merged_sources.append(keys)
                     member = GroupMember(group_id=group.id, user_id=user.id, playlist_key=existing.key)
-                    verb = "Merged" if mode is Mode.MERGE else "Replaced"
+                    verb = "Merged" if mode is Mode.MERGE else "Replacing"
                     self._log(group, f"{verb} {user.title}'s “{existing.title}” ({len(keys)} tracks)", user)
-            except (ShareError, UserNeedsAttention, PlexError) as e:
+            except (UserNeedsAttention, PlexError) as e:
                 self._log(group, f"Couldn't add {user.title}: {e}", user, level="error")
                 continue
             self.session.add(member)
             self.session.commit()
-            new_members.append(member)
+            new_members.append((member, mode is Mode.REPLACE))
 
         if not new_members:
             raise ShareError("Nobody could be added. See the activity log for details.")
 
-        # Merges change the shared list, so every member (including existing ones) is updated.
-        if merged_sources:
-            before = len(group.base_snapshot)
-            group.base_snapshot = union(group.base_snapshot, *merged_sources)
-            self._log(group, f"Shared list now has {len(group.base_snapshot)} tracks "
-                             f"({len(group.base_snapshot) - before} added by merging)")
-            for m in existing_members:
-                user = self._user(m.user_id)
-                summary = self._summary(user, m.playlist_key)
-                keys = self.users.call_as(user, lambda t: self.gateway.playlist_track_keys(t, m.playlist_key))
-                self._backup(user, summary, keys, reason=f"Before merge into shared “{group.name}”")
-            to_push = existing_members + new_members
-        else:
-            to_push = new_members
-
-        for m in to_push:
-            self._push(group, m)
+        to_push = [(m, False) for m, *_ in existing_reads] + new_members
+        for m, allow_removals in to_push:
+            self._push(group, m, allow_removals)
         group.last_synced_at = utcnow()
         self.session.add(group)
         self.session.commit()
 
-    def _push(self, group: ShareGroup, member: GroupMember) -> None:
+    def _read_keys(self, user: HomeUser, summary: PlaylistSummary) -> list[int]:
+        """Read a playlist's tracks and check the count against Plex's own count."""
+        keys = self.users.call_as(user, lambda t: self.gateway.playlist_track_keys(t, summary.key))
+        if len(keys) != summary.track_count:
+            raise ReadMismatch(
+                f"Plex says {user.title}'s “{summary.title}” has {summary.track_count} tracks, but "
+                f"{len(keys)} were read. That doesn't match, so nothing was changed.")
+        return keys
+
+    def _push(self, group: ShareGroup, member: GroupMember, allow_removals: bool = False) -> None:
         """Make one member's playlist match the shared list and record its updatedAt."""
         user = self._user(member.user_id)
         try:
             skipped = self.users.call_as(
-                user, lambda t: self.gateway.set_playlist_tracks(t, member.playlist_key, group.base_snapshot))
+                user, lambda t: self.gateway.set_playlist_tracks(t, member.playlist_key, group.base_snapshot,
+                                                                 allow_removals=allow_removals))
             summary = self._summary(user, member.playlist_key)
             member.skipped = skipped
             member.last_seen_updated_at = summary.updated_at
@@ -187,6 +222,12 @@ class ShareService:
             if skipped:
                 self._log(group, f"{len(skipped)} track(s) skipped for {user.title}: no access to them", user,
                           level="warning")
+            expected = len(group.base_snapshot) - len(skipped)
+            if summary.track_count != expected:
+                member.status = "warning"
+                member.status_detail = (f"Plex shows {summary.track_count} tracks to {user.title}, "
+                                        f"expected {expected}")
+                self._log(group, member.status_detail, user, level="warning")
         except (UserNeedsAttention, PlexError, ShareError) as e:
             member.status, member.status_detail = "error", str(e)
             self._log(group, f"Couldn't update {user.title}'s playlist: {e}", user, level="error")
@@ -203,7 +244,7 @@ class ShareService:
         if delete_playlist:
             try:
                 summary = self._summary(user, member.playlist_key)
-                keys = self.users.call_as(user, lambda t: self.gateway.playlist_track_keys(t, member.playlist_key))
+                keys = self._read_keys(user, summary)
                 self._backup(user, summary, keys, reason=f"Before deleting (left shared “{group.name}”)")
                 self.users.call_as(user, lambda t: self.gateway.delete_playlist(t, member.playlist_key))
             except (UserNeedsAttention, PlexError, ShareError) as e:

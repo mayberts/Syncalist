@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import pytest
 from plexapi.exceptions import BadRequest
 
-from syncalist.plex.gateway import PlexApiGateway
+from syncalist.plex.gateway import PlexApiGateway, RemovalRefused
 
 
 class SimServer:
@@ -59,10 +59,10 @@ class SimServer:
             raise AssertionError(f"unexpected request {method} {path}")
 
 
-def run(current, desired, **kw):
+def run(current, desired, allow_removals=True, **kw):
     srv = SimServer(current, **kw)
-    pl = SimpleNamespace(key="/playlists/5")
-    skipped = PlexApiGateway._set_tracks(PlexApiGateway.__new__(PlexApiGateway), srv, pl, desired)
+    pl = SimpleNamespace(key="/playlists/5", title="Road Trip")
+    skipped = PlexApiGateway._set_tracks(PlexApiGateway.__new__(PlexApiGateway), srv, pl, desired, allow_removals)
     return srv, skipped
 
 
@@ -91,3 +91,16 @@ def test_inaccessible_tracks_are_skipped_in_order():
 def test_batch_rejected_because_of_one_bad_track_falls_back_to_singles():
     srv, skipped = run([], [1, 2, 3, 4], no_access={3}, reject_batches_with_inaccessible=True)
     assert srv.items == [1, 2, 4] and skipped == [3]
+
+
+def test_removal_refused_changes_nothing():
+    srv = SimServer([1, 2, 3])
+    pl = SimpleNamespace(key="/playlists/5", title="Road Trip")
+    with pytest.raises(RemovalRefused):
+        PlexApiGateway._set_tracks(PlexApiGateway.__new__(PlexApiGateway), srv, pl, [1, 3, 4], False)
+    assert srv.items == [1, 2, 3] and srv.requests == []
+
+
+def test_duplicates_removed_even_without_allow_removals():
+    srv, _ = run([1, 2, 2, 3], [1, 2, 3, 4], allow_removals=False)
+    assert srv.items == [1, 2, 3, 4]

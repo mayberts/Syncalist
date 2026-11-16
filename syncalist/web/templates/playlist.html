@@ -5,7 +5,7 @@
 <div class="pagehead">
   <div>
     <h1>{{ playlist.title }}</h1>
-    <p class="muted">{{ user.title }} · {{ tracks|length }} tracks · changed {{ playlist.updated_at|ago }}{% if playlist.smart %} · smart playlist{% endif %}</p>
+    <p class="muted">{{ user.title }} · {{ tracks|length }} tracks · changed {{ playlist.updated_at|ago }}{% if playlist.smart %} · smart playlist{% endif %} · <a href="/debug/playlist?user_id={{ user.id }}&playlist_key={{ playlist.key }}">diagnostics</a></p>
   </div>
 </div>
 <section class="card">

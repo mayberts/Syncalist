@@ -28,6 +28,10 @@ class TokenRejected(PlexError):
     """The server rejected a user's token (expired or revoked)."""
 
 
+class RemovalRefused(PlexError):
+    """A write would have removed tracks, and removals weren't allowed."""
+
+
 @dataclass(frozen=True)
 class MusicSection:
     key: str
@@ -80,7 +84,9 @@ class Gateway(Protocol):
     def playlist(self, user_token: str, playlist_key: int) -> PlaylistSummary | None: ...
     def playlist_track_keys(self, user_token: str, playlist_key: int) -> list[int]: ...
     def create_playlist(self, user_token: str, title: str, track_keys: list[int]) -> PlaylistSummary: ...
-    def set_playlist_tracks(self, user_token: str, playlist_key: int, track_keys: list[int]) -> list[int]: ...
+    def set_playlist_tracks(self, user_token: str, playlist_key: int, track_keys: list[int],
+                            allow_removals: bool = False) -> list[int]: ...
+    def debug_playlist(self, user_token: str, playlist_key: int) -> dict: ...
     def delete_playlist(self, user_token: str, playlist_key: int) -> None: ...
     def tracks_info(self, track_keys: list[int]) -> list[Track]: ...
 
@@ -211,15 +217,18 @@ class PlexApiGateway:
             break
         if pl is None:
             raise PlexError("This user can't access any of the playlist's tracks")
-        self._set_tracks(srv, pl, track_keys)
+        self._set_tracks(srv, pl, track_keys, allow_removals=False)
         return _summary(srv.fetchItem(int(pl.ratingKey)))
 
     @_wrap
-    def set_playlist_tracks(self, user_token: str, playlist_key: int, track_keys: list[int]) -> list[int]:
+    def set_playlist_tracks(self, user_token: str, playlist_key: int, track_keys: list[int],
+                            allow_removals: bool = False) -> list[int]:
         """Make the playlist hold exactly track_keys, in order. Returns tracks that
-        couldn't be added because the user can't access them."""
+        couldn't be added because the user can't access them.
+
+        Unless allow_removals is set, nothing is changed if any track would be removed."""
         srv = self._user_server(user_token)
-        return self._set_tracks(srv, srv.fetchItem(playlist_key), track_keys)
+        return self._set_tracks(srv, srv.fetchItem(playlist_key), track_keys, allow_removals)
 
     @_wrap
     def delete_playlist(self, user_token: str, playlist_key: int) -> None:
@@ -234,6 +243,62 @@ class PlexApiGateway:
             out += [_track(t) for t in self.admin_server.fetchItems(f"/library/metadata/{chunk}")]
         return out
 
+    def debug_playlist(self, user_token: str, playlist_key: int) -> dict:
+        """Read-only: every way of counting a playlist's tracks, to find where they disagree."""
+        srv = self._user_server(user_token)
+        out: dict = {"playlist_key": playlist_key}
+
+        def attempt(name, fn):
+            try:
+                out[name] = fn()
+            except Exception as e:  # noqa: BLE001 - diagnostics
+                out[name] = f"ERROR {type(e).__name__}: {e}"
+
+        def listing():
+            for p in srv.playlists(playlistType="audio"):
+                if int(p.ratingKey) == playlist_key:
+                    return {"title": p.title, "leafCount": p.leafCount, "smart": p.smart,
+                            "updatedAt": str(p.updatedAt)}
+            return None
+        attempt("listing", listing)
+
+        def by_key():
+            pl = srv.fetchItem(playlist_key)
+            return {"type": type(pl).__name__, "key": getattr(pl, "key", None),
+                    "leafCount": getattr(pl, "leafCount", None), "radio": getattr(pl, "radio", None),
+                    "playlistType": getattr(pl, "playlistType", None)}
+        attempt("fetchItem", by_key)
+
+        def summarise(items):
+            keys = [str(getattr(i, "ratingKey", None)) for i in items]
+            types = {}
+            for i in items:
+                types[type(i).__name__] = types.get(type(i).__name__, 0) + 1
+            return {"count": len(items), "unique_ratingKeys": len(set(keys)), "types": types,
+                    "with_sourceURI": sum(1 for i in items if getattr(i, "sourceURI", None)),
+                    "first": [{"ratingKey": getattr(i, "ratingKey", None), "title": getattr(i, "title", None),
+                               "playlistItemID": getattr(i, "playlistItemID", None)} for i in items[:5]]}
+        attempt("items()", lambda: summarise(srv.fetchItem(playlist_key).items()))
+        attempt("fetchItems(/items)", lambda: summarise(srv.fetchItems(f"/playlists/{playlist_key}/items")))
+
+        def raw():
+            data = srv.query(f"/playlists/{playlist_key}/items",
+                             headers={"X-Plex-Container-Start": "0", "X-Plex-Container-Size": "5000"})
+            tags = {}
+            for child in data:
+                tags[child.tag] = tags.get(child.tag, 0) + 1
+            return {"container": {k: data.attrib.get(k) for k in ("size", "totalSize", "leafCount", "offset")},
+                    "child_tags": tags,
+                    "unique_ratingKeys": len({c.attrib.get("ratingKey") for c in data})}
+        attempt("raw /items (size 5000)", raw)
+
+        def raw_paged():
+            data = srv.query(f"/playlists/{playlist_key}/items",
+                             headers={"X-Plex-Container-Start": "0", "X-Plex-Container-Size": "100"})
+            return {k: data.attrib.get(k) for k in ("size", "totalSize", "leafCount", "offset")}
+        attempt("raw /items (size 100)", raw_paged)
+        return out
+
     # -- helpers ---------------------------------------------------------------------
     def _fetch_playlist(self, user_token: str, playlist_key: int) -> Playlist:
         pl = self._user_server(user_token).fetchItem(playlist_key)
@@ -241,18 +306,28 @@ class PlexApiGateway:
             raise PlexError("Not a regular music playlist")
         return pl
 
-    def _set_tracks(self, srv: PlexServer, pl: Playlist, desired: list[int]) -> list[int]:
+    def _set_tracks(self, srv: PlexServer, pl: Playlist, desired: list[int],
+                    allow_removals: bool = False) -> list[int]:
         desired = planner.dedupe(desired)
         wanted = set(desired)
 
         # 1. Remove tracks that shouldn't be there, and any duplicates (keep the first).
         seen: set[int] = set()
+        to_remove = []
         for item in self._fresh_items(srv, pl):
             k = int(item.ratingKey)
             if k in wanted and k not in seen:
                 seen.add(k)
+            elif k in seen:
+                to_remove.append(item)  # duplicate: always safe to remove
             else:
-                srv.query(f"{pl.key}/items/{item.playlistItemID}", method=srv._session.delete)
+                to_remove.append(item)
+                if not allow_removals:
+                    raise RemovalRefused(
+                        f"Stopped before changing anything: this would have removed track {k} "
+                        f"from “{pl.title}”, which shouldn't happen here.")
+        for item in to_remove:
+            srv.query(f"{pl.key}/items/{item.playlistItemID}", method=srv._session.delete)
 
         # 2. Append missing tracks by ratingKey. Plex ignores ones the user can't access.
         adds = [k for k in desired if k not in seen]

@@ -78,3 +78,8 @@ def test_restore_backup(configured, plex):
     configured.post(f"/backups/{backup_id}/restore")
     restored = [p for p in plex.playlists[KATE_ID].values() if p["title"].startswith("Road Trip (restored")]
     assert len(restored) == 1 and restored[0]["items"] == [3, 5, 6]
+
+
+def test_debug_playlist_page(configured):
+    r = configured.get(f"/debug/playlist?user_id={KATE_ID}&playlist_key=253611")
+    assert r.status_code == 200 and r.json()["items()"]["count"] == 3 and "token" not in r.text.lower()

@@ -5,8 +5,8 @@ from fastapi.testclient import TestClient
 
 from syncalist.config import Config
 from syncalist.plex.auth import AccountInfo, Pin
-from syncalist.plex.gateway import (HomeUserInfo, MusicSection, PlaylistSummary, PlexError, ServerInfo,
-                                    TokenRejected, Track)
+from syncalist.plex.gateway import (HomeUserInfo, MusicSection, PlaylistSummary, PlexError, RemovalRefused,
+                                    ServerInfo, TokenRejected, Track)
 from syncalist.sync import planner
 from syncalist.web.app import create_app
 
@@ -56,6 +56,8 @@ class FakePlex:
         self.catalog[143610] = Track(143610, "Trapped", "2Pac", "2Pacalypse Now", 285000)
         self.catalog[143611] = Track(143611, "Soulja’s Story", "2Pac", "2Pacalypse Now", 305000)
         self.no_access: dict[int, set[int]] = {}  # user -> track keys they can't see
+        self.short_reads: dict[int, int] = {}  # playlist key -> number of tracks a read returns (simulated bug)
+        self.hidden_count: dict[int, int] = {}  # playlist key -> leafCount Plex reports (simulated restrictions)
         self.clock = datetime(2026, 11, 1, 10, 0, tzinfo=timezone.utc)
         self.next_key = 1000
         self.playlists: dict[int, dict[int, dict]] = {ADMIN_ID: {}, KATE_ID: {}, CLEO_ID: {}}
@@ -120,9 +122,9 @@ class FakeGateway:
             raise PlexError("404 not found")
         return uid, pl
 
-    @staticmethod
-    def _summary(key, pl):
-        return PlaylistSummary(key, pl["title"], len(pl["items"]), pl["updated"], pl["smart"])
+    def _summary(self, key, pl):
+        count = self.plex.hidden_count.get(key, len(pl["items"]))
+        return PlaylistSummary(key, pl["title"], count, pl["updated"], pl["smart"])
 
     def playlists(self, token):
         uid = self.plex.user_for_token(token)
@@ -139,7 +141,8 @@ class FakeGateway:
         return [self.plex.catalog[k] for k in pl["items"]]
 
     def playlist_track_keys(self, token, key):
-        return list(self._pl(token, key)[1]["items"])
+        items = list(self._pl(token, key)[1]["items"])
+        return items[:self.plex.short_reads[key]] if key in self.plex.short_reads else items
 
     def tracks_info(self, keys):
         return [self.plex.catalog[k] for k in keys if k in self.plex.catalog]
@@ -154,19 +157,25 @@ class FakeGateway:
         if not ok:
             raise PlexError("This user can't access any of the playlist's tracks")
         key = self.plex.add_playlist(uid, title, [])
-        self.set_playlist_tracks(token, key, keys)
+        self.set_playlist_tracks(token, key, keys, allow_removals=False)
         return self.playlist(token, key)
 
-    def set_playlist_tracks(self, token, key, keys):
+    def set_playlist_tracks(self, token, key, keys, allow_removals=False):
         uid, pl = self._pl(token, key)
         desired = planner.dedupe(keys)
         ok = self._accessible(uid, desired)
+        if not allow_removals and any(k not in set(desired) for k in pl["items"]):
+            raise RemovalRefused("Stopped before changing anything: this would have removed tracks")
         if pl["items"] != ok:
             p = planner.plan(pl["items"], ok)
             pl["items"] = planner.apply(pl["items"], p)
             assert pl["items"] == ok
             pl["updated"] = self.plex.tick()
         return [k for k in desired if k not in ok]
+
+    def debug_playlist(self, token, key):
+        _, pl = self._pl(token, key)
+        return {"playlist_key": key, "items()": {"count": len(pl["items"])}}
 
     def delete_playlist(self, token, key):
         uid, _ = self._pl(token, key)

@@ -449,6 +449,20 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
                 flash(request, str(e), "error")
         return RedirectResponse("/backups", status_code=303)
 
+    @app.get("/debug/playlist")
+    def debug_playlist(request: Request, user_id: int, playlist_key: int, session: Session = Depends(db),
+                       settings: AppSettings = Depends(require_admin)):
+        """Read-only diagnostics for one playlist. Contains no tokens."""
+        user = session.get(HomeUser, user_id)
+        if user is None:
+            return JSONResponse({"error": "no such user"}, status_code=404)
+        svc = UserService(session, secrets, gateway_for(settings))
+        try:
+            data = svc.call_as(user, lambda t: svc.gateway.debug_playlist(t, playlist_key))
+        except (UserNeedsAttention, PlexError) as e:
+            data = {"error": str(e)}
+        return JSONResponse({"user": user.title, "user_is_admin": user.is_admin, **data})
+
     # -- settings ------------------------------------------------------------------------------
     @app.get("/settings", response_class=HTMLResponse)
     def settings_page(request: Request, session: Session = Depends(db),

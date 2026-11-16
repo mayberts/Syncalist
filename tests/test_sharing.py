@@ -134,3 +134,44 @@ def test_restore_creates_new_playlist(svc, plex):
     restored = svc.restore(backup)
     assert restored.title.startswith("Road Trip (restored ")
     assert plex.items(KATE_ID, restored.key) == [3, 5, 6]
+
+
+# -- safeguards added after the real-server merge lost tracks ------------------------------------
+
+def test_short_read_of_recipient_stops_merge_before_any_write(svc, plex):
+    plex.short_reads[253611] = 1  # Kate's Road Trip (3 tracks) reads back as 1
+    before_admin, before_kate = list(plex.items(ADMIN_ID, 11)), list(plex.items(KATE_ID, 253611))
+    with pytest.raises(ShareError, match="doesn't match"):
+        svc.share(user(svc, ADMIN_ID), 11, {KATE_ID: Mode.MERGE, CLEO_ID: Mode.NEW})
+    assert plex.items(ADMIN_ID, 11) == before_admin and plex.items(KATE_ID, 253611) == before_kate
+    assert not any(p["title"] == "Road Trip" for p in plex.playlists[CLEO_ID].values())
+    assert svc.groups() == [] and svc.backups() == []
+
+
+def test_short_read_of_source_stops_share(svc, plex):
+    plex.short_reads[11] = 2
+    with pytest.raises(ShareError, match="doesn't match"):
+        svc.share(user(svc, ADMIN_ID), 11, {CLEO_ID: Mode.NEW})
+    assert svc.groups() == []
+
+
+def test_merge_never_removes_tracks_even_if_shared_list_is_wrong(svc, plex):
+    g = svc.share(user(svc, ADMIN_ID), 11, {CLEO_ID: Mode.NEW})
+    plex.playlists[ADMIN_ID][11]["items"].append(7)  # admin added a track since sharing (not synced yet)
+    svc.add_members(g, {KATE_ID: Mode.MERGE})
+    assert 7 in plex.items(ADMIN_ID, 11)  # refused rather than removed
+    admin_member = members_by_user(svc, g)[ADMIN_ID]
+    assert admin_member.status == "error" and "removed" in admin_member.status_detail
+
+
+def test_replace_is_the_only_mode_that_removes(svc, plex):
+    svc.share(user(svc, ADMIN_ID), 11, {KATE_ID: Mode.REPLACE})
+    assert plex.items(KATE_ID, 253611) == [1, 2, 3, 4]
+
+
+def test_plex_showing_fewer_tracks_is_flagged(svc, plex):
+    g = svc.share(user(svc, ADMIN_ID), 10, {CLEO_ID: Mode.NEW})
+    cleo = members_by_user(svc, g)[CLEO_ID]
+    plex.hidden_count[cleo.playlist_key] = 1
+    svc._push(g, cleo)
+    assert cleo.status == "warning" and "Plex shows 1 tracks to Cleo, expected 2" in cleo.status_detail
