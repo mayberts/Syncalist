@@ -20,7 +20,7 @@ from ..crypto import Secrets
 from ..db import get_app_settings, make_engine
 from ..models import AppSettings, HomeUser, PlaylistBackup, ShareGroup
 from ..plex.auth import Pin, PlexAuth, PlexAuthError
-from ..plex.gateway import Gateway, PlexApiGateway, PlexError
+from ..plex.gateway import Gateway, PlexApiGateway, PlexError, TokenRejected
 from ..sharing import Mode, ShareError, ShareService
 from ..users import UserNeedsAttention, UserService
 
@@ -141,6 +141,14 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
             return RedirectResponse("/login", status_code=303)
         request.session.pop("pin", None)
 
+        if account.managed:
+            request.session.clear()
+            return render(request, "error.html", status_code=403, signed_in=False,
+                          title="Switch to the server owner",
+                          message=f"Plex signed you in as {account.title}, a managed Home user. Plex uses whichever "
+                                  "Home user is currently active in this browser. Open app.plex.tv, switch to the "
+                                  "account that owns the server, then come back and sign in again.")
+
         if settings.admin_account_id is None:
             # First run: this account sets the app up. /setup checks it owns the server.
             request.session["account_id"] = account.id
@@ -199,8 +207,10 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
                           account_title=request.session.get("account_title"))
         try:
             info = gateway_factory(plex_url, token).server_info()
+        except TokenRejected:
+            return fail(f"Plex at {plex_url} refused this account. Sign in with the account that owns the server.")
         except PlexError as e:
-            return fail(f"Couldn't connect to Plex at {plex_url}: {e}")
+            return fail(f"Couldn't connect to Plex at {plex_url}: {_short(e)}")
         if not info.owner_is_signed_in_account:
             return fail(f"Your Plex account doesn't own the server “{info.name}”. "
                         "Sign in with the account that owns it.")
@@ -496,6 +506,12 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
         return RedirectResponse("/settings", status_code=303)
 
     return app
+
+
+def _short(e: Exception, limit: int = 200) -> str:
+    """First line of an error, without any HTML page Plex sent back."""
+    text = str(e).split("<html", 1)[0].strip().rstrip(";").strip()
+    return text[:limit] or type(e).__name__
 
 
 def _ago(value: datetime | None) -> str:

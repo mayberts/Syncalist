@@ -115,3 +115,25 @@ def test_admin_re_sign_in_stores_new_token(configured, auth, plex):
     r = sign_in(configured)
     assert r.headers["location"] == "/"
     assert configured.get("/").status_code == 200
+
+
+def test_managed_home_user_is_told_to_switch(client, auth):
+    auth.account_info = AccountInfo(id=KATE_ID, title="Kate", username=None, managed=True)
+    r = sign_in(client)
+    assert r.status_code == 403 and "managed Home user" in r.text and "app.plex.tv" in r.text
+    assert client.get("/setup").headers["location"] == "/login"
+
+
+def test_setup_rejected_token_message_is_short(client, plex, app):
+    import conftest
+    from syncalist.plex.gateway import TokenRejected
+
+    orig = conftest.FakeGateway.server_info
+    conftest.FakeGateway.server_info = lambda self: (_ for _ in ()).throw(
+        TokenRejected("(401) unauthorized; http://x/ <html><head></head></html>"))
+    try:
+        sign_in(client)
+        r = client.post("/setup", data={"plex_url": "http://plex:32400"})
+        assert r.status_code == 400 and "refused this account" in r.text and "&lt;html" not in r.text
+    finally:
+        conftest.FakeGateway.server_info = orig

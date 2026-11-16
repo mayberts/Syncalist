@@ -29,6 +29,7 @@ class AccountInfo:
     id: int
     title: str
     username: str | None
+    managed: bool = False  # a managed Plex Home user (no plex.tv login of their own)
 
 
 class PlexAuthError(Exception):
@@ -90,4 +91,4 @@ class PlexAuth:
             raise PlexAuthError(f"Couldn't look up the Plex account: {e}") from e
         data = r.json()
         return AccountInfo(id=int(data["id"]), title=data.get("title") or data.get("username") or "",
-                           username=data.get("username"))
+                           username=data.get("username"), managed=bool(data.get("restricted")))
