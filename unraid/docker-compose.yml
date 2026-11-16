@@ -1,0 +1,15 @@
+# Syncalist on Unraid with Docker Compose (e.g. the Compose Manager plugin).
+services:
+  syncalist:
+    image: ghcr.io/mayberts/syncalist:latest
+    container_name: Syncalist
+    ports:
+      - "8585:8585"
+    volumes:
+      - /mnt/user/appdata/syncalist:/config   # database + encryption key; include in appdata backups
+    environment:
+      - PLEX_URL=http://192.168.1.36:32400    # pre-fills first-time setup only
+      - SYNC_INTERVAL=60                       # initial default; change it in the web UI
+      - PUID=99                                # nobody
+      - PGID=100                               # users
+    restart: unless-stopped

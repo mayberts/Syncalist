@@ -22,7 +22,7 @@ The image is published to `ghcr.io/mayberts/syncalist:latest` by GitHub Actions 
 3. Check the Plex URL, then **Apply**.
 4. Open the web UI from the container's icon and sign in with the Plex account that owns the server.
 
-Data is stored in `/mnt/user/appdata/syncalist`. The container runs as `PUID`/`PGID` (99/100 by default on Unraid).
+Data is stored in `/mnt/user/appdata/syncalist`. If you use Docker Compose on Unraid instead of the template, use [`unraid/docker-compose.yml`](unraid/docker-compose.yml), which maps the same folder. The container runs as `PUID`/`PGID` (99/100 by default on Unraid).
 
 If the repository is private, the image is private too. Either make the package public
 (GitHub → your profile → **Packages** → *syncalist* → **Package settings** → **Change visibility**),
