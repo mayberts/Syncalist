@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}{{ playlist.title }} · Syncalist{% endblock %}
+{% block content %}
+<p><a href="/">← All playlists</a></p>
+<div class="pagehead">
+  <div>
+    <h1>{{ playlist.title }}</h1>
+    <p class="muted">{{ user.title }} · {{ tracks|length }} tracks · changed {{ playlist.updated_at|ago }}{% if playlist.smart %} · smart playlist{% endif %}</p>
+  </div>
+</div>
+<section class="card">
+  <table>
+    <thead><tr><th class="num">#</th><th>Title</th><th>Artist</th><th>Album</th><th class="num">Length</th></tr></thead>
+    <tbody>
+    {% for t in tracks %}
+      <tr>
+        <td class="num muted">{{ loop.index }}</td>
+        <td>{{ t.title }}</td>
+        <td>{{ t.artist }}</td>
+        <td class="muted">{{ t.album }}</td>
+        <td class="num muted">{% if t.duration_ms %}{{ (t.duration_ms // 60000) }}:{{ '%02d' % ((t.duration_ms // 1000) % 60) }}{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

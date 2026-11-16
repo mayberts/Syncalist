@@ -99,6 +99,8 @@ def main():
     ap.add_argument("--library", help="Music library name. Defaults to the first music library.")
     ap.add_argument("--read-only", action="store_true", help="Skip the write tests")
     ap.add_argument("--keep", action="store_true", help="Don't delete the temporary test playlist")
+    ap.add_argument("--use-pin-token", action="store_true",
+                    help="Run the read/write tests with the PIN token instead of the no-PIN token")
     args = ap.parse_args()
     if not args.url or not args.token:
         ap.error("--url and --token are required (or set PLEX_URL / PLEX_TOKEN)")
@@ -171,7 +173,9 @@ def main():
         if not res:
             raise RuntimeError("Switched user has no resource entry for this server")
         srv = PlexServer(args.url, res[0].accessToken)
-        ctx["user_server"] = srv  # prefer the PIN path if it works
+        ctx["pin_server"] = srv
+        if args.use_pin_token or "user_server" not in ctx:
+            ctx["user_server"] = srv
         return {"switched_account": ua.title, "got_token": True}
     if user.protected and not pin:
         print("   (PIN test skipped)")
@@ -182,6 +186,8 @@ def main():
         print("\nCould not get a server token for the user by either method. Stopping.")
         finish(1)
     usrv: PlexServer = ctx["user_server"]
+    REPORT["tests_use_token"] = "pin" if usrv is ctx.get("pin_server") else "no-pin"
+    print(f"\nRunning the playlist tests with the {REPORT['tests_use_token']} token.")
 
     # 4. Read the user's playlists ---------------------------------------------
     def read_playlists():
@@ -203,8 +209,8 @@ def main():
         nopin = keys(ctx["nopin_server"])
         res = {"nopin_token_playlist_count": len(nopin),
                "nopin_sees_same_as_admin": nopin == keys(admin)}
-        if ctx["user_server"] is not ctx["nopin_server"]:
-            res["nopin_sees_same_as_pin_user"] = nopin == keys(ctx["user_server"])
+        if "pin_server" in ctx:
+            res["nopin_sees_same_as_pin_user"] = nopin == keys(ctx["pin_server"])
         return res
     if "nopin_server" in ctx:
         step("Compare no-PIN token with PIN token", compare_tokens)

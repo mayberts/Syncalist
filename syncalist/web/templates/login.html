@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Sign in · Syncalist{% endblock %}
+{% block content %}
+<section class="card narrow center">
+  <h1>Sign in</h1>
+  {% if first_run %}
+  <p>Welcome to Syncalist. Sign in with the Plex account that <strong>owns your Plex server</strong> to set it up.</p>
+  {% else %}
+  <p>Sign in with the Plex account that owns {{ server_name or "the Plex server" }}.</p>
+  {% endif %}
+  <a class="button primary" href="/auth/start">Sign in with Plex</a>
+</section>
+{% endblock %}

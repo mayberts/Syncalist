@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Settings · Syncalist{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+
+<section class="card">
+  <h2>Sync interval</h2>
+  <form method="post" action="/settings" class="inline">
+    <label for="poll_interval">Check playlists every</label>
+    <input id="poll_interval" name="poll_interval" type="number" min="{{ min_interval }}" max="{{ max_interval }}" value="{{ settings.poll_interval }}" required>
+    <span>seconds</span>
+    <button class="primary">Save</button>
+  </form>
+  <p class="hint">Between {{ min_interval }} and {{ max_interval }} seconds. Takes effect straight away.</p>
+</section>
+
+<section class="card">
+  <h2>Plex server</h2>
+  <dl>
+    <dt>Server</dt><dd>{{ settings.server_name }}</dd>
+    <dt>Address</dt><dd>{{ settings.plex_url }}</dd>
+    <dt>Music library</dt><dd>{{ settings.music_section_title }}</dd>
+    <dt>Signed in as</dt><dd>{{ settings.admin_title }}</dd>
+  </dl>
+  <p><a href="/setup">Change server address</a> · <a href="/setup/library">Change library</a></p>
+</section>
+
+<section class="card">
+  <h2>Home users</h2>
+  <p class="hint">Syncalist gets access to each user through your admin account, so PINs aren't normally needed. Only enter a PIN if a user shows a problem.</p>
+  <table>
+    <thead><tr><th>User</th><th>Status</th><th>Fallback PIN</th></tr></thead>
+    <tbody>
+    {% for u in users %}
+      <tr>
+        <td>{{ u.title }}{% if u.is_admin %} <span class="tag">admin</span>{% endif %}</td>
+        <td>{% if u.status == "ok" %}<span class="ok">OK</span>{% else %}<span class="bad" title="{{ u.status_detail }}">Needs attention</span>{% endif %}</td>
+        <td>
+          {% if u.is_admin %}<span class="muted">not needed</span>
+          {% else %}
+          <form method="post" action="/users/{{ u.id }}/pin" class="inline">
+            <input name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="{{ 'saved' if u.fallback_pin_enc else '4 digits' }}" required aria-label="PIN for {{ u.title }}">
+            <button>Save</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

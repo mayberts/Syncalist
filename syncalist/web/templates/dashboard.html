@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="pagehead">
+  <div>
+    <h1>Music playlists</h1>
+    <p class="muted">{{ settings.server_name }} · {{ settings.music_section_title }} library · read-only for now</p>
+  </div>
+  <form method="post" action="/users/refresh"><button>Refresh users</button></form>
+</div>
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+{% if not rows %}<p class="muted">No Home users found.</p>{% endif %}
+<div class="users">
+{% for row in rows %}
+  <section class="card user">
+    <header>
+      {% if row.user.thumb %}<img class="avatar" src="{{ row.user.thumb }}" alt="" referrerpolicy="no-referrer">{% else %}<span class="avatar"></span>{% endif %}
+      <h2>{{ row.user.title }}</h2>
+      {% if row.user.is_admin %}<span class="tag">admin</span>{% endif %}
+      {% if row.user.has_pin %}<span class="tag">PIN</span>{% endif %}
+      {% if not row.error %}<span class="count">{{ row.playlists|length }} playlist{{ '' if row.playlists|length == 1 else 's' }}</span>{% endif %}
+    </header>
+    {% if row.error %}
+      <div class="flash error">{{ row.error }} <a href="/settings">Fix in Settings</a></div>
+    {% elif not row.playlists %}
+      <p class="muted">No music playlists.</p>
+    {% else %}
+    <table>
+      <thead><tr><th>Playlist</th><th class="num">Tracks</th><th>Last changed</th></tr></thead>
+      <tbody>
+      {% for p in row.playlists %}
+        <tr>
+          <td><a href="/users/{{ row.user.id }}/playlists/{{ p.key }}">{{ p.title }}</a>{% if p.smart %} <span class="tag">smart</span>{% endif %}</td>
+          <td class="num">{{ p.track_count }}</td>
+          <td class="muted">{{ p.updated_at|ago }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </section>
+{% endfor %}
+</div>
+{% endblock %}

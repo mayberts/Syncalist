@@ -114,7 +114,7 @@ The merge is a **pure function** (`merge(base, {member: current_list}) -> canoni
 | # | Milestone | Outcome |
 |---|---|---|
 | M0 | **Spike** | Script that signs in as admin, lists Home users, gets a PIN-protected user's token (with and without the PIN), then reads, writes and renames one of their playlists. ✅ **Done.** Results in section 9. |
-| M1 | Skeleton | FastAPI app, Plex sign-in, SQLite, Docker image. Lists users and their music playlists, read-only. |
+| M1 | Skeleton | FastAPI app, Plex sign-in, SQLite, Docker image. Lists users and their music playlists, read-only. 🟡 **Built, awaiting a test on the real server.** Still to confirm: no-PIN token writes (`plex_spike.py` now uses that token by default). |
 | M2 | One-way share | Create a share group and copy the playlist to recipients. Backups. |
 | M3 | Two-way sync | Merge engine plus planner with full unit tests, scheduler, echo suppression. |
 | M4 | UX and safety | Activity log, skipped-track warnings, leave/unshare flows, restore from backup, dry-run mode. |

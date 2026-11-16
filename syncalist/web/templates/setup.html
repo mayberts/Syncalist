@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Setup · Syncalist{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Connect to your Plex server</h1>
+  {% if account_title %}<p class="muted">Signed in as {{ account_title }}.</p>{% endif %}
+  {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+  <form method="post" action="/setup" class="stack">
+    <label for="plex_url">Plex server address</label>
+    <input id="plex_url" name="plex_url" value="{{ plex_url }}" placeholder="http://192.168.1.10:32400" required>
+    <p class="hint">The address of Plex on your home network, including the port (usually 32400).</p>
+    <button class="primary">Connect</button>
+  </form>
+</section>
+{% endblock %}

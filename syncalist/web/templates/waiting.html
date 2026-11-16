@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Waiting for Plex · Syncalist{% endblock %}
+{% block head %}<meta http-equiv="refresh" content="2">{% endblock %}
+{% block content %}
+<section class="card narrow center">
+  <h1>Waiting for Plex…</h1>
+  <p>Finish signing in on the Plex page. This page checks again every couple of seconds.</p>
+  <p><a href="{{ auth_url }}">Open the Plex sign-in page again</a> · <a href="/login">Start over</a></p>
+</section>
+{% endblock %}

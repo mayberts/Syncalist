@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Choose library · Syncalist{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Choose your music library</h1>
+  <form method="post" action="/setup/library" class="stack">
+    {% for s in sections %}
+    <label class="radio"><input type="radio" name="section_key" value="{{ s.key }}" {% if s.key == current or loop.first and not current %}checked{% endif %}> {{ s.title }}</label>
+    {% endfor %}
+    <button class="primary">Continue</button>
+  </form>
+</section>
+{% endblock %}

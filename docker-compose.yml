@@ -1,0 +1,13 @@
+services:
+  syncalist:
+    build: .
+    container_name: syncalist
+    ports:
+      - "8585:8585"
+    volumes:
+      - ./data:/config          # database + encryption key live here
+    environment:
+      - PLEX_URL=http://192.168.1.36:32400   # pre-fills setup; change it in the UI later
+      - SYNC_INTERVAL=60                      # initial default only; change it in the UI later
+    # The container runs as uid 1000. If ./data is owned by someone else, set user: "<uid>:<gid>".
+    restart: unless-stopped
