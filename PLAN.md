@@ -117,7 +117,7 @@ The merge is a **pure function** (`merge(base, {member: current_list}) -> canoni
 |---|---|---|
 | M0 | **Spike** | Script that signs in as admin, lists Home users, gets a PIN-protected user's token (with and without the PIN), then reads, writes and renames one of their playlists. ✅ **Done.** Results in section 9. |
 | M1 | Skeleton | FastAPI app, Plex sign-in, SQLite, Docker image. Lists users and their music playlists, read-only. ✅ **Running on Unraid** (`ghcr.io/mayberts/syncalist`, Unraid template in `unraid/`). All 5 Home users read without PINs. No-PIN token *writes* are still untested; they're confirmed on the first M2 share if the spike isn't re-run. |
-| M2 | One-way share | Create a share group and copy the playlist to recipients. Backups. |
+| M2 | Sharing | Create a share group and copy the playlist to recipients. Backups. 🟡 **Built, awaiting a test on the real server.** Share dialog with merge / replace / keep separate, add and remove people, stop sharing, skipped-track reporting, backups restored as new playlists, activity log. Later edits aren't synced yet (M3). |
 | M3 | Two-way sync | Merge engine plus planner with full unit tests, scheduler, echo suppression. |
 | M4 | UX and safety | Activity log, skipped-track warnings, leave/unshare flows, restore from backup, dry-run mode. |
 | M5 | Release | docker-compose example, README, health check, multi-arch image (amd64/arm64 for NAS / Raspberry Pi). The UI is for the home network only, so there is no HTTPS or reverse-proxy setup. |

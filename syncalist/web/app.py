@@ -11,15 +11,17 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Engine
 from sqlmodel import Session, select
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
 from .. import __version__
 from ..config import Config
 from ..crypto import Secrets
 from ..db import get_app_settings, make_engine
-from ..models import AppSettings, HomeUser
+from ..models import AppSettings, HomeUser, PlaylistBackup, ShareGroup
 from ..plex.auth import Pin, PlexAuth, PlexAuthError
 from ..plex.gateway import Gateway, PlexApiGateway, PlexError
+from ..sharing import Mode, ShareError, ShareService
 from ..users import UserNeedsAttention, UserService
 
 HERE = Path(__file__).parent
@@ -269,6 +271,11 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
             users = svc.all() or svc.refresh()
         except PlexError as e:
             users, error = svc.all(), f"Couldn't load Home users from plex.tv: {e}"
+        shares = ShareService(session, svc)
+        shared = shares.member_index()
+        groups = shares.groups()
+        group_members = {g.id: shares.members(g) for g in groups}
+        names = {u.id: u.title for u in users}
         rows = []
         for user in users:
             row = {"user": user, "playlists": [], "error": None}
@@ -277,7 +284,8 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
             except (UserNeedsAttention, PlexError) as e:
                 row["error"] = str(e)
             rows.append(row)
-        return render(request, "dashboard.html", settings=settings, rows=rows, error=error)
+        return render(request, "dashboard.html", settings=settings, rows=rows, error=error,
+                      shared=shared, groups=groups, group_members=group_members, names=names)
 
     @app.post("/users/refresh")
     def refresh_users(request: Request, session: Session = Depends(db),
@@ -305,6 +313,141 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
         except (UserNeedsAttention, PlexError) as e:
             return render(request, "error.html", status_code=502, title="Plex error", message=str(e))
         return render(request, "playlist.html", user=user, playlist=summary, tracks=tracks)
+
+    # -- sharing (M2) ------------------------------------------------------------------------------
+    def share_service(session: Session, settings: AppSettings) -> ShareService:
+        return ShareService(session, UserService(session, secrets, gateway_for(settings)))
+
+    def parse_recipients(form) -> dict[int, Mode]:
+        out = {}
+        for raw in form.getlist("recipient"):
+            uid = int(raw)
+            try:
+                out[uid] = Mode(form.get(f"mode_{uid}", Mode.NEW.value))
+            except ValueError:
+                out[uid] = Mode.NEW
+        return out
+
+    @app.get("/share", response_class=HTMLResponse)
+    def share_page(request: Request, user_id: int, playlist_key: int, session: Session = Depends(db),
+                   settings: AppSettings = Depends(require_admin)):
+        shares = share_service(session, settings)
+        owner = session.get(HomeUser, user_id)
+        if owner is None:
+            return render(request, "error.html", status_code=404, title="Not found", message="No such Home user.")
+        try:
+            source = shares._summary(owner, playlist_key)
+        except (ShareError, UserNeedsAttention, PlexError) as e:
+            return render(request, "error.html", status_code=404, title="Not found", message=str(e))
+        if (owner.id, playlist_key) in shares.member_index():
+            m = shares.member_index()[(owner.id, playlist_key)]
+            return RedirectResponse(f"/groups/{m.group_id}", status_code=303)
+        candidates = shares.candidates(source.title, exclude_user_ids={owner.id})
+        return render(request, "share.html", owner=owner, source=source, candidates=candidates,
+                      action="/share", group=None)
+
+    @app.post("/share")
+    async def share_post(request: Request, session: Session = Depends(db),
+                         settings: AppSettings = Depends(require_admin)):
+        form = await request.form()
+        user_id, playlist_key = int(form["user_id"]), int(form["playlist_key"])
+        recipients = parse_recipients(form)
+        shares = share_service(session, settings)
+        owner = session.get(HomeUser, user_id)
+        try:
+            group = await run_in_threadpool(shares.share, owner, playlist_key, recipients)
+        except (ShareError, UserNeedsAttention, PlexError) as e:
+            flash(request, str(e), "error")
+            return RedirectResponse(f"/share?user_id={user_id}&playlist_key={playlist_key}", status_code=303)
+        flash(request, f"Shared “{group.name}”.", "success")
+        return RedirectResponse(f"/groups/{group.id}", status_code=303)
+
+    @app.get("/groups/{group_id}", response_class=HTMLResponse)
+    def group_page(request: Request, group_id: int, session: Session = Depends(db),
+                   settings: AppSettings = Depends(require_admin)):
+        group = session.get(ShareGroup, group_id)
+        if group is None:
+            return render(request, "error.html", status_code=404, title="Not found",
+                          message="That shared playlist doesn't exist any more.")
+        shares = share_service(session, settings)
+        rows = []
+        all_skipped: set[int] = set()
+        for m in shares.members(group):
+            user = session.get(HomeUser, m.user_id)
+            row = {"member": m, "user": user, "summary": None, "error": None}
+            try:
+                row["summary"] = shares.users.call_as(user, lambda t: shares.gateway.playlist(t, m.playlist_key))
+                if row["summary"] is None:
+                    row["error"] = "Their playlist has been deleted."
+            except (UserNeedsAttention, PlexError) as e:
+                row["error"] = str(e)
+            all_skipped.update(m.skipped)
+            rows.append(row)
+        skipped_info = {}
+        if all_skipped:
+            try:
+                skipped_info = {t.key: t for t in shares.gateway.tracks_info(sorted(all_skipped))}
+            except PlexError:
+                pass
+        member_ids = {r["user"].id for r in rows}
+        candidates = shares.candidates(group.name, exclude_user_ids=member_ids)
+        return render(request, "group.html", group=group, rows=rows, skipped_info=skipped_info,
+                      candidates=candidates, events=shares.events(group),
+                      owner=session.get(HomeUser, group.owner_user_id))
+
+    @app.post("/groups/{group_id}/members")
+    async def group_add(request: Request, group_id: int, session: Session = Depends(db),
+                        settings: AppSettings = Depends(require_admin)):
+        form = await request.form()
+        group = session.get(ShareGroup, group_id)
+        if group is None:
+            return RedirectResponse("/", status_code=303)
+        try:
+            await run_in_threadpool(share_service(session, settings).add_members, group, parse_recipients(form))
+            flash(request, "Updated the shared playlist.", "success")
+        except (ShareError, UserNeedsAttention, PlexError) as e:
+            flash(request, str(e), "error")
+        return RedirectResponse(f"/groups/{group_id}", status_code=303)
+
+    @app.post("/groups/{group_id}/members/{user_id}/remove")
+    def group_remove(request: Request, group_id: int, user_id: int, delete_copy: str | None = Form(None),
+                     session: Session = Depends(db), settings: AppSettings = Depends(require_admin)):
+        group = session.get(ShareGroup, group_id)
+        if group is not None:
+            try:
+                share_service(session, settings).remove_member(group, user_id, delete_playlist=bool(delete_copy))
+                flash(request, "Removed.", "success")
+            except ShareError as e:
+                flash(request, str(e), "error")
+        return RedirectResponse(f"/groups/{group_id}", status_code=303)
+
+    @app.post("/groups/{group_id}/stop")
+    def group_stop(request: Request, group_id: int, session: Session = Depends(db),
+                   settings: AppSettings = Depends(require_admin)):
+        group = session.get(ShareGroup, group_id)
+        if group is not None:
+            name = group.name
+            share_service(session, settings).stop_sharing(group)
+            flash(request, f"Stopped sharing “{name}”. Everyone keeps their own copy.", "success")
+        return RedirectResponse("/", status_code=303)
+
+    @app.get("/backups", response_class=HTMLResponse)
+    def backups_page(request: Request, session: Session = Depends(db),
+                     settings: AppSettings = Depends(require_admin)):
+        shares = share_service(session, settings)
+        return render(request, "backups.html", backups=shares.backups(), events=shares.events(limit=100))
+
+    @app.post("/backups/{backup_id}/restore")
+    def backup_restore(request: Request, backup_id: int, session: Session = Depends(db),
+                       settings: AppSettings = Depends(require_admin)):
+        backup = session.get(PlaylistBackup, backup_id)
+        if backup is not None:
+            try:
+                restored = share_service(session, settings).restore(backup)
+                flash(request, f"Restored as “{restored.title}” for {backup.user_title}.", "success")
+            except ShareError as e:
+                flash(request, str(e), "error")
+        return RedirectResponse("/backups", status_code=303)
 
     # -- settings ------------------------------------------------------------------------------
     @app.get("/settings", response_class=HTMLResponse)

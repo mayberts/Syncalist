@@ -3,11 +3,29 @@
 <div class="pagehead">
   <div>
     <h1>Music playlists</h1>
-    <p class="muted">{{ settings.server_name }} · {{ settings.music_section_title }} library · read-only for now</p>
+    <p class="muted">{{ settings.server_name }} · {{ settings.music_section_title }} library</p>
   </div>
   <form method="post" action="/users/refresh"><button>Refresh users</button></form>
 </div>
 {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+{% if groups %}
+<section class="card">
+  <h2>Shared playlists</h2>
+  <table>
+    <thead><tr><th>Playlist</th><th>Shared with</th><th class="num">Tracks</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for g in groups %}{% set ms = group_members[g.id] %}
+      <tr>
+        <td><a href="/groups/{{ g.id }}">{{ g.name }}</a></td>
+        <td>{% for m in ms %}{{ names.get(m.user_id, "?") }}{{ ", " if not loop.last }}{% endfor %}</td>
+        <td class="num">{{ g.base_snapshot|length }}</td>
+        <td>{% if ms|selectattr("status", "ne", "ok")|list %}<span class="bad">Problem</span>{% elif ms|selectattr("skipped")|list %}<span class="warn">Some tracks skipped</span>{% else %}<span class="ok">OK</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
 {% if not rows %}<p class="muted">No Home users found.</p>{% endif %}
 <div class="users">
 {% for row in rows %}
@@ -25,13 +43,20 @@
       <p class="muted">No music playlists.</p>
     {% else %}
     <table>
-      <thead><tr><th>Playlist</th><th class="num">Tracks</th><th>Last changed</th></tr></thead>
+      <thead><tr><th>Playlist</th><th class="num">Tracks</th><th>Last changed</th><th></th></tr></thead>
       <tbody>
       {% for p in row.playlists %}
         <tr>
           <td><a href="/users/{{ row.user.id }}/playlists/{{ p.key }}">{{ p.title }}</a>{% if p.smart %} <span class="tag">smart</span>{% endif %}</td>
           <td class="num">{{ p.track_count }}</td>
           <td class="muted">{{ p.updated_at|ago }}</td>
+          <td class="num">
+            {% set m = shared.get((row.user.id, p.key)) %}
+            {% if m %}<a class="tag shared" href="/groups/{{ m.group_id }}">shared</a>
+            {% elif p.smart %}<span class="muted small" title="Smart playlists are rules, not track lists, so they can't be shared">—</span>
+            {% elif p.track_count %}<a class="button small" href="/share?user_id={{ row.user.id }}&playlist_key={{ p.key }}">Share</a>
+            {% endif %}
+          </td>
         </tr>
       {% endfor %}
       </tbody>

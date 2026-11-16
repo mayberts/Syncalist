@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 
+from sqlalchemy import JSON, Column, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -42,3 +43,50 @@ class HomeUser(SQLModel, table=True):
     status: str = "ok"  # ok | needs_attention
     status_detail: str | None = None
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class ShareGroup(SQLModel, table=True):
+    """One shared playlist: a set of real Plex playlists (one per member) kept identical."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+    owner_user_id: int  # who shared it first
+    base_snapshot: list[int] = Field(default_factory=list, sa_column=Column(JSON))  # last agreed track list
+    created_at: datetime = Field(default_factory=utcnow)
+    last_synced_at: datetime | None = None
+
+
+class GroupMember(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("group_id", "user_id"), UniqueConstraint("user_id", "playlist_key"))
+
+    id: int | None = Field(default=None, primary_key=True)
+    group_id: int = Field(foreign_key="sharegroup.id", index=True)
+    user_id: int = Field(foreign_key="homeuser.id")
+    playlist_key: int
+    last_seen_updated_at: datetime | None = None  # Plex updatedAt after our last write (echo suppression)
+    skipped: list[int] = Field(default_factory=list, sa_column=Column(JSON))  # tracks this user can't access
+    status: str = "ok"  # ok | error
+    status_detail: str | None = None
+    joined_at: datetime = Field(default_factory=utcnow)
+
+
+class PlaylistBackup(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int
+    user_title: str
+    playlist_key: int
+    title: str
+    track_keys: list[int] = Field(default_factory=list, sa_column=Column(JSON))
+    reason: str
+    taken_at: datetime = Field(default_factory=utcnow)
+
+
+class SyncEvent(SQLModel, table=True):
+    """Activity log entry."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    group_id: int | None = Field(default=None, index=True)
+    user_id: int | None = None
+    message: str
+    level: str = "info"  # info | warning | error
+    at: datetime = Field(default_factory=utcnow)

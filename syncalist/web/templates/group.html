@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ group.name }} · Syncalist{% endblock %}
+{% block content %}
+<p><a href="/">← All playlists</a></p>
+<div class="pagehead">
+  <div>
+    <h1>{{ group.name }} <span class="tag">shared</span></h1>
+    <p class="muted">{{ group.base_snapshot|length }} tracks · shared by {{ owner.title if owner else "unknown" }} {{ group.created_at|ago }}</p>
+  </div>
+  <form method="post" action="/groups/{{ group.id }}/stop" onsubmit="return confirm('Stop sharing “{{ group.name }}”? Everyone keeps their own copy, but changes will no longer be shared.')">
+    <button>Stop sharing</button>
+  </form>
+</div>
+
+<div class="flash info">Changes made after sharing aren't copied between people yet. Automatic syncing comes in the next update.</div>
+
+<section class="card">
+  <h2>Members</h2>
+  <table>
+    <thead><tr><th>Person</th><th>Their playlist</th><th class="num">Tracks</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.user.title }}{% if r.user.id == group.owner_user_id %} <span class="tag">owner</span>{% endif %}</td>
+        <td>{% if r.summary %}<a href="/users/{{ r.user.id }}/playlists/{{ r.member.playlist_key }}">{{ r.summary.title }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="num">{{ r.summary.track_count if r.summary else "—" }}</td>
+        <td>
+          {% if r.error %}<span class="bad">{{ r.error }}</span>
+          {% elif r.member.status != "ok" %}<span class="bad">{{ r.member.status_detail }}</span>
+          {% elif r.member.skipped %}<span class="warn">{{ r.member.skipped|length }} skipped</span>
+          {% else %}<span class="ok">OK</span>{% endif %}
+        </td>
+        <td class="num">
+          {% if rows|length > 1 %}
+          <details class="remove">
+            <summary>Remove</summary>
+            <form method="post" action="/groups/{{ group.id }}/members/{{ r.user.id }}/remove" class="stack">
+              <label class="check"><input type="checkbox" name="delete_copy" value="1"> Also delete their copy (it's backed up first)</label>
+              <button>Remove {{ r.user.title }}</button>
+            </form>
+          </details>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% set skipped_rows = rows|selectattr("member.skipped")|list %}
+  {% if skipped_rows %}
+  <h3>Skipped tracks</h3>
+  <p class="hint">These people can't access some tracks (their library access is restricted), so those tracks aren't in their copy. Everyone else still has them.</p>
+  <ul class="skipped">
+    {% for r in skipped_rows %}
+      <li><strong>{{ r.user.title }}</strong>:
+        {% for k in r.member.skipped %}{% set t = skipped_info.get(k) %}{{ t.title ~ " – " ~ t.artist if t else "track " ~ k }}{{ ", " if not loop.last }}{% endfor %}
+      </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Add people</h2>
+  <form method="post" action="/groups/{{ group.id }}/members" class="stack">
+    {% set title = group.name %}
+    {% include "_recipients.html" %}
+    {% if candidates %}<button class="primary">Add</button>{% endif %}
+  </form>
+</section>
+
+<section class="card">
+  <h2>Activity</h2>
+  {% include "_events.html" %}
+</section>
+{% endblock %}

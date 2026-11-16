@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Backups · Syncalist{% endblock %}
+{% block content %}
+<h1>Backups</h1>
+<p class="muted">Syncalist backs up a playlist before it merges into, replaces or deletes it. Restoring creates a <strong>new</strong> playlist next to the current one, so nothing is overwritten.</p>
+<section class="card">
+  {% if not backups %}<p class="muted">No backups yet.</p>{% else %}
+  <table>
+    <thead><tr><th>Taken</th><th>Person</th><th>Playlist</th><th class="num">Tracks</th><th>Why</th><th></th></tr></thead>
+    <tbody>
+    {% for b in backups %}
+      <tr>
+        <td class="muted" title="{{ b.taken_at }}">{{ b.taken_at|ago }}</td>
+        <td>{{ b.user_title }}</td>
+        <td>{{ b.title }}</td>
+        <td class="num">{{ b.track_keys|length }}</td>
+        <td class="muted">{{ b.reason }}</td>
+        <td class="num"><form method="post" action="/backups/{{ b.id }}/restore"><button>Restore</button></form></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+<section class="card">
+  <h2>Activity</h2>
+  {% include "_events.html" %}
+</section>
+{% endblock %}

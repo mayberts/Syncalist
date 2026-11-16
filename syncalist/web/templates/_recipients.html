@@ -1,0 +1,34 @@
+{# People picker shared by the share dialog and the group page. Needs: candidates, title #}
+{% if not candidates %}
+  <p class="muted">Everyone is already in this shared playlist.</p>
+{% else %}
+<div class="recipients">
+  {% for c in candidates %}
+  <div class="recipient">
+    <label class="check">
+      <input type="checkbox" name="recipient" value="{{ c.user.id }}" {% if c.error %}disabled{% endif %}>
+      <strong>{{ c.user.title }}</strong>
+    </label>
+    {% if c.error %}
+      <p class="hint bad">Can't reach this user: {{ c.error }}</p>
+    {% elif c.existing and not c.existing_is_shared %}
+      <fieldset class="modes">
+        <legend>{{ c.user.title }} already has “{{ c.existing.title }}” ({{ c.existing.track_count }} tracks). What should happen to it?</legend>
+        <label class="radio"><input type="radio" name="mode_{{ c.user.id }}" value="merge" checked>
+          <span><strong>Merge</strong>: combine both, nothing is lost. Everyone ends up with all tracks from both.</span></label>
+        <label class="radio"><input type="radio" name="mode_{{ c.user.id }}" value="replace">
+          <span><strong>Replace</strong>: overwrite theirs with the shared one. A backup is taken first.</span></label>
+        <label class="radio"><input type="radio" name="mode_{{ c.user.id }}" value="new">
+          <span><strong>Keep separate</strong>: leave theirs alone and give them a new copy. They'll have two with the same name.</span></label>
+      </fieldset>
+    {% elif c.existing and c.existing_is_shared %}
+      <p class="hint">Their “{{ c.existing.title }}” is already in another shared playlist, so they'll get a new copy.</p>
+      <input type="hidden" name="mode_{{ c.user.id }}" value="new">
+    {% else %}
+      <p class="hint">A new playlist called “{{ title }}” will be created for them.</p>
+      <input type="hidden" name="mode_{{ c.user.id }}" value="new">
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}

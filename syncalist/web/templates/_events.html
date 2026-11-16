@@ -1,0 +1,7 @@
+{% if not events %}<p class="muted">Nothing yet.</p>{% else %}
+<ul class="events">
+  {% for e in events %}
+  <li class="{{ e.level }}"><span class="when muted" title="{{ e.at }}">{{ e.at|ago }}</span> {{ e.message }}</li>
+  {% endfor %}
+</ul>
+{% endif %}

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -7,6 +7,7 @@ from syncalist.config import Config
 from syncalist.plex.auth import AccountInfo, Pin
 from syncalist.plex.gateway import (HomeUserInfo, MusicSection, PlaylistSummary, PlexError, ServerInfo,
                                     TokenRejected, Track)
+from syncalist.sync import planner
 from syncalist.web.app import create_app
 
 ADMIN_ID, KATE_ID, CLEO_ID = 1, 584691038, 129051550
@@ -33,7 +34,10 @@ class FakeAuth:
 
 
 class FakePlex:
-    """One fake Plex server shared by every gateway the app creates."""
+    """One fake Plex server shared by every gateway the app creates.
+
+    playlists[user_id][key] = {"title", "smart", "items": [ratingKeys], "updated": datetime}
+    """
 
     def __init__(self):
         self.owner = True
@@ -47,16 +51,32 @@ class FakePlex:
             HomeUserInfo(KATE_ID, "Kate", None, True, False),
             HomeUserInfo(CLEO_ID, "Cleo", None, False, False),
         ]
-        self.playlists = {
-            ADMIN_ID: [PlaylistSummary(10, "Admin Mix", 2, datetime(2026, 11, 1, 10, 0), False)],
-            KATE_ID: [PlaylistSummary(309551, "Kate's favourites", 2, datetime(2026, 11, 12, 10, 27), False),
-                      PlaylistSummary(253611, "Road Trip", 1, datetime(2026, 8, 25, 14, 45), False)],
-            CLEO_ID: [],
-        }
-        self.tracks = {
-            309551: [Track(143610, "Trapped", "2Pac", "2Pacalypse Now", 285000),
-                     Track(143611, "Soulja’s Story", "2Pac", "2Pacalypse Now", 305000)],
-        }
+        self.catalog = {k: Track(k, f"Song {k}", f"Artist {k % 7}", f"Album {k % 5}", 200000 + k)
+                        for k in range(1, 200)}
+        self.catalog[143610] = Track(143610, "Trapped", "2Pac", "2Pacalypse Now", 285000)
+        self.catalog[143611] = Track(143611, "Soulja’s Story", "2Pac", "2Pacalypse Now", 305000)
+        self.no_access: dict[int, set[int]] = {}  # user -> track keys they can't see
+        self.clock = datetime(2026, 11, 1, 10, 0, tzinfo=timezone.utc)
+        self.next_key = 1000
+        self.playlists: dict[int, dict[int, dict]] = {ADMIN_ID: {}, KATE_ID: {}, CLEO_ID: {}}
+        self.add_playlist(ADMIN_ID, "Admin Mix", [1, 2], key=10)
+        self.add_playlist(ADMIN_ID, "Road Trip", [1, 2, 3, 4], key=11)
+        self.add_playlist(ADMIN_ID, "All Music", [1, 2, 3], key=12, smart=True)
+        self.add_playlist(KATE_ID, "Kate's favourites", [143610, 143611], key=309551)
+        self.add_playlist(KATE_ID, "Road Trip", [3, 5, 6], key=253611)
+
+    def tick(self):
+        self.clock += timedelta(seconds=1)
+        return self.clock
+
+    def add_playlist(self, user_id, title, items, key=None, smart=False):
+        key = key or self.next_key
+        self.next_key = max(self.next_key, key) + 1
+        self.playlists[user_id][key] = {"title": title, "smart": smart, "items": list(items), "updated": self.tick()}
+        return key
+
+    def items(self, user_id, key):
+        return self.playlists[user_id][key]["items"]
 
     def user_for_token(self, token):
         if token in self.rejected_tokens:
@@ -92,12 +112,65 @@ class FakeGateway:
         self.plex.tokens_issued += 1
         return f"user:{user_id}:{self.plex.tokens_issued}"
 
+    # -- reads ----------------------------------------------------------------------
+    def _pl(self, token, key):
+        uid = self.plex.user_for_token(token)
+        pl = self.plex.playlists[uid].get(key)
+        if pl is None:
+            raise PlexError("404 not found")
+        return uid, pl
+
+    @staticmethod
+    def _summary(key, pl):
+        return PlaylistSummary(key, pl["title"], len(pl["items"]), pl["updated"], pl["smart"])
+
     def playlists(self, token):
-        return self.plex.playlists[self.plex.user_for_token(token)]
+        uid = self.plex.user_for_token(token)
+        return sorted((self._summary(k, p) for k, p in self.plex.playlists[uid].items()),
+                      key=lambda p: p.title.lower())
+
+    def playlist(self, token, key):
+        uid = self.plex.user_for_token(token)
+        pl = self.plex.playlists[uid].get(key)
+        return self._summary(key, pl) if pl else None
 
     def playlist_tracks(self, token, key):
-        self.plex.user_for_token(token)
-        return self.plex.tracks.get(key, [])
+        _, pl = self._pl(token, key)
+        return [self.plex.catalog[k] for k in pl["items"]]
+
+    def playlist_track_keys(self, token, key):
+        return list(self._pl(token, key)[1]["items"])
+
+    def tracks_info(self, keys):
+        return [self.plex.catalog[k] for k in keys if k in self.plex.catalog]
+
+    # -- writes ---------------------------------------------------------------------
+    def _accessible(self, uid, keys):
+        return [k for k in keys if k in self.plex.catalog and k not in self.plex.no_access.get(uid, set())]
+
+    def create_playlist(self, token, title, keys):
+        uid = self.plex.user_for_token(token)
+        ok = self._accessible(uid, planner.dedupe(keys))
+        if not ok:
+            raise PlexError("This user can't access any of the playlist's tracks")
+        key = self.plex.add_playlist(uid, title, [])
+        self.set_playlist_tracks(token, key, keys)
+        return self.playlist(token, key)
+
+    def set_playlist_tracks(self, token, key, keys):
+        uid, pl = self._pl(token, key)
+        desired = planner.dedupe(keys)
+        ok = self._accessible(uid, desired)
+        if pl["items"] != ok:
+            p = planner.plan(pl["items"], ok)
+            pl["items"] = planner.apply(pl["items"], p)
+            assert pl["items"] == ok
+            pl["updated"] = self.plex.tick()
+        return [k for k in desired if k not in ok]
+
+    def delete_playlist(self, token, key):
+        uid, _ = self._pl(token, key)
+        del self.plex.playlists[uid][key]
 
 
 @pytest.fixture

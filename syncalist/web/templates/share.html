@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Share {{ source.title }} · Syncalist{% endblock %}
+{% block content %}
+<p><a href="/">← All playlists</a></p>
+<h1>Share “{{ source.title }}”</h1>
+<p class="muted">{{ owner.title }}'s playlist · {{ source.track_count }} tracks</p>
+<form method="post" action="/share" class="card stack">
+  <input type="hidden" name="user_id" value="{{ owner.id }}">
+  <input type="hidden" name="playlist_key" value="{{ source.key }}">
+  <h2>Who should get it?</h2>
+  {% set title = source.title %}
+  {% include "_recipients.html" %}
+  {% if candidates %}<button class="primary">Share</button>{% endif %}
+</form>
+<p class="hint">Any playlist that is merged into or replaced is backed up first. Backups are on the <a href="/backups">Backups</a> page.</p>
+{% endblock %}
