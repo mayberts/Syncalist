@@ -10,11 +10,18 @@ Keeps music playlists in sync between users of a Plex Home. The Plex Home admin 
 | Web UI users | **Admin only.** The Plex Home admin signs in and manages sharing for everyone. |
 | Media | **Music (audio) playlists only.** Smart playlists, video and photo are out of scope for v1. |
 | Stack / deploy | **Python in one Docker container**, running next to Plex. |
+| Plex servers | **One server.** No multi-server support. |
+| PIN-protected users | **Supported.** The admin enters each user's PIN once in the UI. It is stored encrypted. |
+| Duplicates | **Never.** A shared playlist holds each track at most once. |
+| Titles | **One name for everyone.** Renaming any member's copy renames all copies. |
+| Member deletes their copy | **They drop out of the share.** Nobody else's copy is touched. |
+| Poll interval | **60 s by default, changeable in the UI** (Settings page, applied without a restart). |
+| Network | **Home network only.** Plain HTTP, no reverse proxy or HTTPS needed. |
 
 ## 2. How Plex makes this possible (and where it gets in the way)
 
 - **Playlists belong to one user.** Each Home user has their own playlists on the server. To read or write one, the app has to act as that user.
-- **Acting as a Home user.** With the admin's plex.tv token, `python-plexapi` can get a server token for each Home user (`MyPlexAccount.user(...).get_token(machineId)` / `PlexServer.switchUser(...)`). A **PIN-protected** user may need their PIN entered once (see Open Questions).
+- **Acting as a Home user.** With the admin's plex.tv token, `python-plexapi` can switch to each Home user (`MyPlexAccount.switchHomeUser(user, pin)`) and get that user's token for the server. All your users have **PINs**, so the admin enters each PIN once in the UI. The app stores it encrypted and uses it whenever a user's token has to be refreshed.
 - **All users share the same tracks.** Users are on the same server, so a track has the same `ratingKey` for all of them. A playlist can be copied by ID, with no fuzzy matching on title or artist.
 - **Users can have restricted library access.** If a recipient can't see a track's library, adding it will fail. The app skips that track and flags it in the UI.
 - **Plex doesn't announce playlist edits.** Webhooks don't fire for playlist changes, so the app **polls**. Each playlist's `updatedAt` and `leafCount` make that cheap: it only downloads the full track list when one of those has changed.
@@ -42,7 +49,8 @@ Share group "Road Trip"
    - Apply **all adds**. Each new track goes next to the track it followed in the editor's playlist, or at the end if that track is gone.
    - **Order:** take the order from the member who edited most recently, then slot in the other members' adds.
 4. **Push.** For each member, work out the smallest set of ops (`removeItems`, `addItems`, `moveItem`) that turns their playlist into the canonical list, and apply them.
-5. **Commit.** Save the canonical list as the new base. Save each member's new `updatedAt` **after** the app's own writes, so its edits don't look like user edits on the next poll (echo suppression).
+5. **Title.** If any member renamed their copy since the last sync, the most recent rename becomes the group's name and is applied to every copy.
+6. **Commit.** Save the canonical list as the new base. Save each member's new `updatedAt` **after** the app's own writes, so its edits don't look like user edits on the next poll (echo suppression).
 
 The merge is a **pure function** (`merge(base, {member: current_list}) -> canonical`). That keeps it testable in isolation, which matters because this is where the bugs will be.
 
@@ -52,9 +60,11 @@ The merge is a **pure function** (`merge(base, {member: current_list}) -> canoni
 |---|---|
 | Two people add the same track | Added once. |
 | One person removes a track, another moves it | Remove wins. |
-| A member deletes their Plex playlist | They **leave** the group. Nobody else's copy is deleted. Shown in the UI as "left". |
+| A member deletes their Plex playlist | They **drop out** of the group. Nobody else's copy is deleted. Shown in the UI as "left", and the admin can re-add them. |
 | A recipient can't access a track (library restrictions) | Skipped for that user and flagged in the UI. Kept for everyone else. |
-| Duplicate tracks in one playlist | Treated as a single track (see Open Questions). |
+| Someone adds a duplicate track | The duplicate is removed again on the next sync. Each track appears once. |
+| Two members rename their copies between polls | The rename with the later `updatedAt` wins. Every copy gets that name. |
+| A user's PIN changes, or their token stops working | That member is marked "needs PIN" and skipped. The other members keep syncing. The dashboard asks the admin to re-enter the PIN. |
 | Sharing an existing playlist to a new user | A new playlist is created for them with the same title, filled with the canonical list. |
 | Stop sharing with a user | Choice in the UI: keep their copy as a normal playlist, or delete it. |
 | First sync of a group | Back up every member's playlist first, so it can be restored. |
@@ -80,32 +90,35 @@ The merge is a **pure function** (`merge(base, {member: current_list}) -> canoni
 
 ### Data model (SQLite)
 
-- `settings`: Plex URL, server machineId, admin token (encrypted at rest), poll interval.
-- `home_user`: id, plex_user_id, title, avatar, cached server token, PIN-required flag.
-- `share_group`: id, name, created_at, enabled, base_snapshot (JSON list of ratingKeys), last_synced_at.
+- `settings`: Plex URL, server machineId, admin token (encrypted), poll interval (seconds, default 60).
+- `home_user`: id, plex_user_id, title, avatar, PIN (encrypted), cached server token (encrypted), status (ok / needs PIN).
+- `share_group`: id, name (the shared title), created_at, enabled, base_snapshot (JSON list of ratingKeys), last_synced_at.
 - `group_member`: group_id, home_user_id, plex_playlist_key, last_seen_updated_at, status (active / left / error).
 - `sync_event`: timestamp, group_id, member, action (add/remove/move/error), track info. Feeds the activity log.
 - `playlist_backup`: playlist_key, user, taken_at, items JSON.
 
+**Secrets:** the admin token, user PINs and user tokens are encrypted with Fernet. The key is generated on first run and saved to `/config/secret.key`, so a copy of the database alone doesn't expose them.
+
 ### Web UI pages
 
 1. **Sign in** with Plex. The app checks that the account is the Home admin.
-2. **Setup:** pick the Plex server and library, and choose the poll interval.
-3. **Dashboard:** share groups with members, last sync, status and errors, plus a "Sync now" button.
-4. **Playlists:** all music playlists grouped by user. "Share…" opens a dialog to pick recipient users.
-5. **Group detail:** track list, members (add or remove users), per-member skipped tracks, and an activity log.
-6. **Backups:** restore any playlist from a backup.
+2. **Setup:** pick the music library, then enter each Home user's PIN. Each PIN is checked against plex.tv before it is saved.
+3. **Settings:** change the poll interval (minimum 15 s), re-enter PINs, and see the Plex connection status. A new interval applies right away.
+4. **Dashboard:** share groups with members, last sync, status and errors, plus a "Sync now" button.
+5. **Playlists:** all music playlists grouped by user. "Share…" opens a dialog to pick recipient users.
+6. **Group detail:** track list, members (add or remove users), per-member skipped tracks, and an activity log.
+7. **Backups:** restore any playlist from a backup.
 
 ## 5. Milestones
 
 | # | Milestone | Outcome |
 |---|---|---|
-| M0 | **Spike** | Script that signs in as admin, lists Home users, gets each user's token, then reads and writes one of their playlists. Confirms the riskiest assumptions (PIN users, managed users). |
+| M0 | **Spike** | Script that signs in as admin, lists Home users, switches to a PIN-protected user with their PIN, then reads, writes and renames one of their playlists. Confirms the riskiest assumptions. |
 | M1 | Skeleton | FastAPI app, Plex sign-in, SQLite, Docker image. Lists users and their music playlists, read-only. |
 | M2 | One-way share | Create a share group and copy the playlist to recipients. Backups. |
 | M3 | Two-way sync | Merge engine plus planner with full unit tests, scheduler, echo suppression. |
 | M4 | UX and safety | Activity log, skipped-track warnings, leave/unshare flows, restore from backup, dry-run mode. |
-| M5 | Release | docker-compose example, README, health check, multi-arch image (amd64/arm64 for NAS / Raspberry Pi). |
+| M5 | Release | docker-compose example, README, health check, multi-arch image (amd64/arm64 for NAS / Raspberry Pi). The UI is for the home network only, so there is no HTTPS or reverse-proxy setup. |
 
 ## 6. Testing
 
@@ -123,16 +136,10 @@ services:
     volumes: ["./config:/config"]
     environment:
       - PLEX_URL=http://plex:32400
-      - SYNC_INTERVAL=60
+      - SYNC_INTERVAL=60   # initial default only; change it later in the UI
     restart: unless-stopped
 ```
 
 ## 8. Open questions
 
-1. **PIN-protected Home users:** do any of your users have PINs? If so, is it OK for the admin to enter each PIN once in the UI so the app can store it?
-2. **Duplicates:** should one playlist be allowed to hold the same track twice, or do we always dedupe?
-3. **Titles:** does every member's copy keep the same title (renames sync too), or can each user rename their copy?
-4. **A member deletes their copy:** "leave the group" (proposed default), or recreate it, or delete the playlist for everyone?
-5. **Poll interval:** is 60 s fine? Sync is near-real-time, not instant.
-6. **Access:** LAN only, or will the UI be reached remotely (needs HTTPS / a reverse proxy)?
-7. **One Plex server only?** (Assumed yes.)
+None at the moment. Everything decided is in section 1. New questions will be added here as the M0 spike turns things up.
