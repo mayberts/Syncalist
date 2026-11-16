@@ -183,3 +183,20 @@ def test_stale_plex_count_does_not_block_sharing(svc, plex):
     g = svc.share(user(svc, ADMIN_ID), 11, {KATE_ID: Mode.MERGE})
     assert g.base_snapshot == [1, 2, 3, 4, 5, 6]
     assert any("out of date (81); it actually holds 3" in e.message for e in svc.events(g))
+
+
+def test_group_events_folds_rounds():
+    from syncalist.models import SyncEvent
+    from syncalist.sharing import group_events
+    ev = [  # newest first, as stored
+        SyncEvent(id=6, message="standalone"),
+        SyncEvent(id=5, message="Updated B", level="detail", round_id="r2"),
+        SyncEvent(id=4, message="Updated A", level="detail", round_id="r2"),
+        SyncEvent(id=3, message="Kate added X", round_id="r2"),
+        SyncEvent(id=2, message="Updated C", level="detail", round_id="r1"),
+        SyncEvent(id=1, message="oops", level="error"),
+    ]
+    groups = group_events(ev)
+    assert [[e.message for e in g.main] for g in groups] == [["standalone"], ["Kate added X"], [], ["oops"]]
+    assert [e.message for e in groups[1].details] == ["Updated A", "Updated B"]
+    assert groups[3].level == "error"

@@ -10,6 +10,7 @@ One round for a group:
      again during the round (they're picked up next round instead). Every write is read back.
 """
 
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -67,6 +68,13 @@ class SyncService:
 
     # ------------------------------------------------------------------------------------------
     def sync_group(self, group: ShareGroup, force: bool = False) -> SyncReport:
+        self.shares.current_round = uuid.uuid4().hex[:12]
+        try:
+            return self._sync_group(group, force)
+        finally:
+            self.shares.current_round = None
+
+    def _sync_group(self, group: ShareGroup, force: bool = False) -> SyncReport:
         report = SyncReport(group.name)
         if group.paused_reason and not force:
             report.paused = True
@@ -160,6 +168,13 @@ class SyncService:
 
     def discard_pending(self, group: ShareGroup) -> None:
         """Undo a paused round: put every member back to the last synced list."""
+        self.shares.current_round = uuid.uuid4().hex[:12]
+        try:
+            self._discard_pending(group)
+        finally:
+            self.shares.current_round = None
+
+    def _discard_pending(self, group: ShareGroup) -> None:
         for m in self.shares.members(group):
             user = self.shares._user(m.user_id)
             try:
@@ -224,7 +239,7 @@ class SyncService:
         minus = len([k for k in current if k not in set(actual)])
         moved = "" if plus or minus or actual == current else ", reordered"
         self.shares._log(group, f"Updated {user.title}'s copy: +{plus} −{minus}{moved} "
-                                f"({len(current)} → {len(actual)} tracks)", user)
+                                f"({len(current)} → {len(actual)} tracks)", user, level="detail")
         m.skipped = skipped
         m.last_known = actual
         m.last_seen_updated_at = after.updated_at if after else None

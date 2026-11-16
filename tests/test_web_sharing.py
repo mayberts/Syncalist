@@ -25,7 +25,7 @@ def test_share_merge_end_to_end(configured, plex):
     assert plex.items(KATE_ID, 253611) == [1, 2, 3, 4, 5, 6]
     dash = configured.get("/").text
     assert "Shared playlists" in dash and 'class="tag shared"' in dash
-    backups = configured.get("/backups").text
+    backups = configured.get("/history").text
     assert "Before merge into shared" in backups
 
 
@@ -57,7 +57,7 @@ def test_add_remove_and_stop(configured, plex):
 
     configured.post(f"{gid}/stop")
     assert configured.get(gid).status_code == 404
-    assert "Stopped sharing" in configured.get("/backups").text
+    assert "Stopped sharing" in configured.get("/history").text
 
 
 def test_skipped_tracks_are_listed(configured, plex):
@@ -71,7 +71,7 @@ def test_skipped_tracks_are_listed(configured, plex):
 def test_restore_backup(configured, plex):
     configured.post("/share", data={"user_id": ADMIN_ID, "playlist_key": 11, "recipient": KATE_ID,
                                     f"mode_{KATE_ID}": "replace"})
-    page = configured.get("/backups").text
+    page = configured.get("/history").text
     assert "Before replace into shared" in page
     import re
     backup_id = re.search(r'/backups/(\d+)/restore', page).group(1)
@@ -142,7 +142,7 @@ def test_attention_badge(configured, plex):
     cleo_key = [k for k, p in plex.playlists[CLEO_ID].items() if p["title"] == "Big"][0]
     plex.edit(CLEO_ID, cleo_key, [1])
     configured.post("/sync")
-    for page in ("/", "/settings", "/backups"):
+    for page in ("/", "/settings", "/history"):
         text = configured.get(page).text
         assert 'class="badge"' in text and ">1</span>" in text
     assert "1 shared playlist needs attention." in configured.get("/").text
@@ -158,3 +158,62 @@ def test_failed_round_is_shown(configured, plex, monkeypatch):
     page = configured.get("/").text
     assert "Sync failed: Plex unreachable" in page and "Sync round failed: Plex unreachable" in page
     assert "&lt;html" not in page
+
+
+def test_backups_url_redirects_to_history(configured):
+    r = configured.get("/backups")
+    assert r.status_code == 303 and r.headers["location"] == "/history#backups"
+    assert 'href="/history">History</a>' in configured.get("/").text
+
+
+def test_sync_round_is_grouped_with_details_folded(configured, plex):
+    gid = configured.post("/share", data={"user_id": ADMIN_ID, "playlist_key": 11, "recipient": [KATE_ID, CLEO_ID],
+                                          f"mode_{KATE_ID}": "replace", f"mode_{CLEO_ID}": "new"}).headers["location"]
+    plex.edit(KATE_ID, 253611, [1, 2, 3, 4, 9])
+    configured.post(f"{gid}/sync")
+    page = configured.get(gid).text
+    import re
+    # the round's headline, with the two per-copy writes folded beneath it
+    block = re.search(r"Kate added “Song 9”.*?</li>", page, re.S).group(0)
+    assert "2 copies updated</summary>" in block
+    assert "Updated Nick&#39;s copy: +1 −0 (4 → 5 tracks)" in block
+    assert f'href="/history?group={gid.rsplit("/", 1)[1]}"' in page
+
+
+def test_history_filters_and_paging(configured, plex):
+    plex.no_access[CLEO_ID] = {2}
+    configured.post("/share", data={"user_id": ADMIN_ID, "playlist_key": 10, "recipient": CLEO_ID})
+    everything = configured.get("/history").text
+    assert "Created “Admin Mix” for Cleo" in everything and "skipped for Cleo" in everything
+    problems = configured.get("/history?show=problems").text
+    assert "skipped for Cleo" in problems and "Created “Admin Mix” for Cleo" not in problems
+
+    import syncalist.web.app as appmod
+    from sqlmodel import Session
+    from syncalist.models import SyncEvent
+    with Session(configured.app.state.engine) as s:
+        for i in range(60):
+            s.add(SyncEvent(message=f"filler {i}"))
+        s.commit()
+    first = configured.get("/history").text
+    assert "Show older" in first and "filler 59" in first and "filler 5<" not in first
+    second = configured.get("/history?page=2").text
+    assert "← Newer" in second and "Created “Admin Mix” for Cleo" in second
+
+
+def test_retention_setting_prunes_old_entries(configured):
+    from datetime import timedelta
+    from sqlmodel import Session, select
+    from syncalist.models import SyncEvent, utcnow
+    with Session(configured.app.state.engine) as s:
+        s.add(SyncEvent(message="ancient", at=utcnow() - timedelta(days=40)))
+        s.add(SyncEvent(message="recent", at=utcnow() - timedelta(days=5)))
+        s.commit()
+    configured.post("/settings/retention", data={"days": "3"})
+    assert "between 7 and 3650" in configured.get("/settings").text
+    configured.post("/settings/retention", data={"days": "30"})
+    page = configured.get("/settings").text
+    assert "kept for 30 days; removed 1 older entries" in page and 'value="30"' in page
+    with Session(configured.app.state.engine) as s:
+        msgs = {e.message for e in s.exec(select(SyncEvent)).all()}
+    assert "ancient" not in msgs and "recent" in msgs

@@ -1,7 +1,18 @@
 # Changelog
 
 Docker images: `ghcr.io/mayberts/syncalist:<version>`. `latest` follows the main branch;
-`0.3` follows the newest 0.3.x release; `0.3.0` never changes.
+`0.4` follows the newest 0.4.x release; `0.4.0` never changes.
+
+## 0.4.0 (2026-11-16)
+
+- **History** page replaces Backups in the menu: activity and backups together.
+  - Each sync round is one entry: what changed (who added, removed, reordered or renamed
+    what), with the per-copy updates folded under "N copies updated".
+  - Filter by **Problems only** and by shared playlist; **Show older** pages back 50 at a time.
+- Shared playlist pages show their recent activity, with a **Full history** link.
+- Activity older than 90 days is deleted automatically after each sync round. The number of
+  days can be changed in **Settings → Activity log** (7–3650). Backups aren't affected.
+- `/backups` links still work (they redirect to History).
 
 ## 0.3.0 (2026-11-16)
 

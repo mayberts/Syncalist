@@ -1,7 +1,19 @@
+{# Activity list. `events` is a list of EventGroup (one sync round, or one standalone entry). #}
 {% if not events %}<p class="muted">Nothing yet.</p>{% else %}
 <ul class="events">
-  {% for e in events %}
-  <li class="{{ e.level }}"><span class="when muted" title="{{ e.at }}">{{ e.at|ago }}</span> {{ e.message }}</li>
+  {% for g in events %}
+  <li class="{{ g.level }}">
+    <span class="when muted" title="{{ g.at }}">{{ g.at|ago }}</span>
+    <div class="what">
+      {% for e in g.main %}<div class="{{ e.level }}">{{ e.message }}</div>{% endfor %}
+      {% if g.details %}
+      <details>
+        <summary>{% if not g.main %}Updated {% endif %}{{ g.details|length }} cop{{ 'y' if g.details|length == 1 else 'ies' }}{% if g.main %} updated{% endif %}</summary>
+        {% for e in g.details %}<div class="detail">{{ e.message }}</div>{% endfor %}
+      </details>
+      {% endif %}
+    </div>
+  </li>
   {% endfor %}
 </ul>
 {% endif %}

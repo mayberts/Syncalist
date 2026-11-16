@@ -8,7 +8,8 @@ A share group links one real Plex playlist per member. Sharing:
      our own writes apart from users' edits.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import timedelta
 from enum import Enum
 
 from sqlmodel import Session, select
@@ -47,6 +48,7 @@ class ShareService:
         self.session = session
         self.users = users
         self.gateway = users.gateway
+        self.current_round: str | None = None  # set by the sync engine so a round's entries group together
 
     # -- queries ---------------------------------------------------------------------------
     def groups(self) -> list[ShareGroup]:
@@ -59,11 +61,24 @@ class ShareService:
         """(user_id, playlist_key) -> membership, for marking shared playlists."""
         return {(m.user_id, m.playlist_key): m for m in self.session.exec(select(GroupMember)).all()}
 
-    def events(self, group: ShareGroup | None = None, limit: int = 50) -> list[SyncEvent]:
-        q = select(SyncEvent).order_by(SyncEvent.at.desc(), SyncEvent.id.desc()).limit(limit)
+    def events(self, group: ShareGroup | None = None, limit: int = 50, offset: int = 0,
+               problems_only: bool = False) -> list[SyncEvent]:
+        q = select(SyncEvent).order_by(SyncEvent.at.desc(), SyncEvent.id.desc()).offset(offset).limit(limit)
         if group is not None:
             q = q.where(SyncEvent.group_id == group.id)
+        if problems_only:
+            q = q.where(SyncEvent.level.in_(["warning", "error"]))
         return list(self.session.exec(q).all())
+
+    def prune_events(self, days: int) -> int:
+        """Delete log entries older than `days`. Returns how many were deleted."""
+        cutoff = utcnow() - timedelta(days=days)
+        old = self.session.exec(select(SyncEvent).where(SyncEvent.at < cutoff)).all()
+        for e in old:
+            self.session.delete(e)
+        if old:
+            self.session.commit()
+        return len(old)
 
     def candidates(self, title: str, exclude_user_ids: set[int]) -> list[Candidate]:
         shared = self.member_index()
@@ -326,5 +341,34 @@ class ShareService:
     def _log(self, group: ShareGroup | None, message: str, user: HomeUser | None = None,
              level: str = "info") -> None:
         self.session.add(SyncEvent(group_id=group.id if group else None, user_id=user.id if user else None,
-                                   message=message, level=level))
+                                   message=message, level=level, round_id=self.current_round))
         self.session.commit()
+
+
+@dataclass
+class EventGroup:
+    """Log entries shown together: one sync round, or a single standalone entry."""
+    at: object
+    main: list[SyncEvent] = field(default_factory=list)
+    details: list[SyncEvent] = field(default_factory=list)
+
+    @property
+    def level(self) -> str:
+        levels = {e.level for e in self.main + self.details}
+        return "error" if "error" in levels else "warning" if "warning" in levels else "info"
+
+
+def group_events(events: list[SyncEvent]) -> list[EventGroup]:
+    """Fold consecutive entries from the same sync round together (newest first, as given).
+    Per-copy write lines ("detail") go under the round's main lines."""
+    out: list[EventGroup] = []
+    current_round = object()
+    for e in events:
+        if e.round_id is None or e.round_id != current_round:
+            out.append(EventGroup(at=e.at))
+            current_round = e.round_id if e.round_id is not None else object()
+        (out[-1].details if e.level == "detail" else out[-1].main).append(e)
+    for g in out:  # within a round, show entries in the order they happened
+        g.main.reverse()
+        g.details.reverse()
+    return out

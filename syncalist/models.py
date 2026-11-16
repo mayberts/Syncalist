@@ -28,6 +28,7 @@ class AppSettings(SQLModel, table=True):
     last_round_at: datetime | None = None
     last_round_ok: bool | None = None
     last_round_summary: str | None = None
+    log_retention_days: int | None = None  # None = default (90)
 
     @property
     def is_configured(self) -> bool:
@@ -98,5 +99,6 @@ class SyncEvent(SQLModel, table=True):
     group_id: int | None = Field(default=None, index=True)
     user_id: int | None = None
     message: str
-    level: str = "info"  # info | warning | error
+    level: str = "info"  # info | warning | error | detail (per-copy write lines, folded in the UI)
+    round_id: str | None = Field(default=None, index=True)  # entries from one sync round share this
     at: datetime = Field(default_factory=utcnow)

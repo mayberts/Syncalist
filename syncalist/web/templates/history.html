@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}History · Syncalist{% endblock %}
+{% block content %}
+<h1>History</h1>
+
+<section class="card">
+  <div class="pagehead">
+    <h2>Activity</h2>
+    <form method="get" action="/history" class="inline filters">
+      <label class="sr-only" for="show">Show</label>
+      <select id="show" name="show" onchange="this.form.submit()">
+        <option value="all" {% if show != "problems" %}selected{% endif %}>Everything</option>
+        <option value="problems" {% if show == "problems" %}selected{% endif %}>Problems only</option>
+      </select>
+      <label class="sr-only" for="group">Shared playlist</label>
+      <select id="group" name="group" onchange="this.form.submit()">
+        <option value="">All playlists</option>
+        {% for g in groups %}<option value="{{ g.id }}" {% if selected and selected.id == g.id %}selected{% endif %}>{{ g.name }}</option>{% endfor %}
+      </select>
+      <noscript><button>Filter</button></noscript>
+    </form>
+  </div>
+  {% include "_events.html" %}
+  <div class="pager">
+    {% if page > 1 %}<a href="/history?show={{ show }}{% if selected %}&group={{ selected.id }}{% endif %}&page={{ page - 1 }}">← Newer</a>{% endif %}
+    {% if more %}<a href="/history?show={{ show }}{% if selected %}&group={{ selected.id }}{% endif %}&page={{ page + 1 }}">Show older →</a>{% endif %}
+  </div>
+  <p class="hint">Entries older than {{ retention }} days are deleted automatically. Change this in <a href="/settings">Settings</a>.</p>
+</section>
+
+<section class="card" id="backups">
+  <h2>Backups</h2>
+  <p class="muted">Syncalist backs up a playlist before it merges into, replaces, deletes, or removes tracks from it (the 10 newest per playlist are kept). Restoring creates a <strong>new</strong> playlist next to the current one, so nothing is overwritten.</p>
+  {% if not backups %}<p class="muted">No backups yet.</p>{% else %}
+  <table>
+    <thead><tr><th>Taken</th><th>Person</th><th>Playlist</th><th class="num">Tracks</th><th>Why</th><th></th></tr></thead>
+    <tbody>
+    {% for b in backups %}
+      <tr>
+        <td class="muted" title="{{ b.taken_at }}">{{ b.taken_at|ago }}</td>
+        <td>{{ b.user_title }}</td>
+        <td>{{ b.title }}</td>
+        <td class="num">{{ b.track_keys|length }}</td>
+        <td class="muted">{{ b.reason }}</td>
+        <td class="num"><form method="post" action="/backups/{{ b.id }}/restore"><button>Restore</button></form></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endblock %}

@@ -23,7 +23,7 @@ from ..db import get_app_settings, make_engine
 from ..models import AppSettings, GroupMember, HomeUser, PlaylistBackup, ShareGroup, utcnow
 from ..plex.auth import Pin, PlexAuth, PlexAuthError
 from ..plex.gateway import Gateway, PlexApiGateway, PlexError, TokenRejected
-from ..sharing import Mode, ShareError, ShareService
+from ..sharing import Mode, ShareError, ShareService, group_events
 from ..sync.engine import SyncService, summarise
 from ..sync.scheduler import Scheduler
 from ..users import UserNeedsAttention, UserService
@@ -31,6 +31,8 @@ from ..users import UserNeedsAttention, UserService
 HERE = Path(__file__).parent
 PIN_TIMEOUT_S = 300
 MIN_INTERVAL, MAX_INTERVAL = 15, 3600
+DEFAULT_RETENTION_DAYS, MIN_RETENTION, MAX_RETENTION = 90, 7, 3650
+HISTORY_PAGE = 50
 
 GatewayFactory = Callable[[str, str], Gateway]
 
@@ -58,7 +60,9 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
             if not settings.is_configured or not token:
                 return None
             try:
-                ok, summary = summarise(SyncService(share_service(session, settings)).sync_all())
+                shares = share_service(session, settings)
+                ok, summary = summarise(SyncService(shares).sync_all())
+                shares.prune_events(settings.log_retention_days or DEFAULT_RETENTION_DAYS)
             except Exception as e:  # noqa: BLE001 - e.g. Plex unreachable; recorded, then re-raised
                 session.rollback()
                 ok, summary = False, f"Sync round failed: {_short(e)}"
@@ -96,6 +100,7 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
     app = FastAPI(title="Syncalist", version=__version__, docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.scheduler = scheduler
     app.state.run_sync_round = run_sync_round
+    app.state.engine = engine
     app.add_middleware(SessionMiddleware, secret_key=secrets.session_secret,
                        session_cookie="syncalist_session", max_age=30 * 24 * 3600, same_site="lax")
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
@@ -474,7 +479,7 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
         member_ids = {r["user"].id for r in rows}
         candidates = shares.candidates(group.name, exclude_user_ids=member_ids)
         return render(request, "group.html", group=group, rows=rows, skipped_info=skipped_info,
-                      candidates=candidates, events=shares.events(group),
+                      candidates=candidates, events=group_events(shares.events(group, limit=30)),
                       owner=session.get(HomeUser, group.owner_user_id))
 
     @app.post("/groups/{group_id}/members")
@@ -547,11 +552,23 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
         flash(request, "Undone: everyone is back to the last synced version.", "success")
         return RedirectResponse(f"/groups/{group_id}", status_code=303)
 
-    @app.get("/backups", response_class=HTMLResponse)
-    def backups_page(request: Request, session: Session = Depends(db),
-                     settings: AppSettings = Depends(require_admin)):
+    @app.get("/backups")
+    def backups_page():
+        return RedirectResponse("/history#backups", status_code=303)
+
+    @app.get("/history", response_class=HTMLResponse)
+    def history_page(request: Request, show: str = "all", group: int | None = None, page: int = 1,
+                     session: Session = Depends(db), settings: AppSettings = Depends(require_admin)):
         shares = share_service(session, settings)
-        return render(request, "backups.html", backups=shares.backups(), events=shares.events(limit=100))
+        page = max(1, page)
+        selected = session.get(ShareGroup, group) if group else None
+        # One extra row tells us whether there's an older page.
+        rows = shares.events(selected, limit=HISTORY_PAGE + 1, offset=(page - 1) * HISTORY_PAGE,
+                             problems_only=show == "problems")
+        return render(request, "history.html", events=group_events(rows[:HISTORY_PAGE]),
+                      more=len(rows) > HISTORY_PAGE, page=page, show=show, selected=selected,
+                      groups=shares.groups(), backups=shares.backups(),
+                      retention=settings.log_retention_days or DEFAULT_RETENTION_DAYS)
 
     @app.post("/backups/{backup_id}/restore")
     def backup_restore(request: Request, backup_id: int, session: Session = Depends(db),
@@ -563,7 +580,7 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
                 flash(request, f"Restored as “{restored.title}” for {backup.user_title}.", "success")
             except ShareError as e:
                 flash(request, str(e), "error")
-        return RedirectResponse("/backups", status_code=303)
+        return RedirectResponse("/history#backups", status_code=303)
 
     @app.get("/debug/playlist")
     def debug_playlist(request: Request, user_id: int, playlist_key: int, session: Session = Depends(db),
@@ -585,7 +602,23 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
                       settings: AppSettings = Depends(require_admin)):
         users = UserService(session, secrets, gateway_for(settings)).all()
         return render(request, "settings.html", settings=settings, users=users,
-                      min_interval=MIN_INTERVAL, max_interval=MAX_INTERVAL)
+                      min_interval=MIN_INTERVAL, max_interval=MAX_INTERVAL,
+                      retention=settings.log_retention_days or DEFAULT_RETENTION_DAYS,
+                      min_retention=MIN_RETENTION, max_retention=MAX_RETENTION)
+
+    @app.post("/settings/retention")
+    def retention_post(request: Request, days: int = Form(...), session: Session = Depends(db),
+                       settings: AppSettings = Depends(require_admin)):
+        if not MIN_RETENTION <= days <= MAX_RETENTION:
+            flash(request, f"Keep the log between {MIN_RETENTION} and {MAX_RETENTION} days.", "error")
+        else:
+            settings.log_retention_days = days
+            session.add(settings)
+            session.commit()
+            removed = share_service(session, settings).prune_events(days)
+            flash(request, f"Activity is now kept for {days} days"
+                           + (f"; removed {removed} older entries." if removed else "."), "success")
+        return RedirectResponse("/settings", status_code=303)
 
     @app.post("/settings")
     def settings_post(request: Request, poll_interval: int = Form(...), session: Session = Depends(db),

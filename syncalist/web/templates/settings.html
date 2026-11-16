@@ -15,6 +15,17 @@
 </section>
 
 <section class="card">
+  <h2>Activity log</h2>
+  <form method="post" action="/settings/retention" class="inline">
+    <label for="days">Keep activity for</label>
+    <input id="days" name="days" type="number" min="{{ min_retention }}" max="{{ max_retention }}" value="{{ retention }}" required>
+    <span>days</span>
+    <button class="primary">Save</button>
+  </form>
+  <p class="hint">Older entries are deleted after each sync round. Backups aren't affected.</p>
+</section>
+
+<section class="card">
   <h2>Plex server</h2>
   <dl>
     <dt>Server</dt><dd>{{ settings.server_name }}</dd>
