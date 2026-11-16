@@ -24,6 +24,10 @@ class AppSettings(SQLModel, table=True):
     music_section_key: str | None = None
     music_section_title: str | None = None
     poll_interval: int = 60
+    # Status of the most recent full sync round (all shared playlists).
+    last_round_at: datetime | None = None
+    last_round_ok: bool | None = None
+    last_round_summary: str | None = None
 
     @property
     def is_configured(self) -> bool:

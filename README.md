@@ -35,8 +35,8 @@ edit the container and set **Repository** to a release tag instead:
 
 | Tag | Updates |
 |---|---|
-| `ghcr.io/mayberts/syncalist:0.2` | Fixes within 0.2 (0.2.1, 0.2.2…) |
-| `ghcr.io/mayberts/syncalist:0.2.0` | Never; exactly this release |
+| `ghcr.io/mayberts/syncalist:0.3` | Fixes within 0.3 (0.3.1, 0.3.2…) |
+| `ghcr.io/mayberts/syncalist:0.3.0` | Never; exactly this release |
 
 Releases and what changed are listed in [CHANGELOG.md](CHANGELOG.md).
 

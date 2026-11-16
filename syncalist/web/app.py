@@ -20,11 +20,11 @@ from .. import __version__
 from ..config import Config
 from ..crypto import Secrets
 from ..db import get_app_settings, make_engine
-from ..models import AppSettings, HomeUser, PlaylistBackup, ShareGroup
+from ..models import AppSettings, GroupMember, HomeUser, PlaylistBackup, ShareGroup, utcnow
 from ..plex.auth import Pin, PlexAuth, PlexAuthError
 from ..plex.gateway import Gateway, PlexApiGateway, PlexError, TokenRejected
 from ..sharing import Mode, ShareError, ShareService
-from ..sync.engine import SyncService
+from ..sync.engine import SyncService, summarise
 from ..sync.scheduler import Scheduler
 from ..users import UserNeedsAttention, UserService
 
@@ -50,13 +50,35 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
     gateways: dict[tuple[str, str], Gateway] = {}
     sync_lock = threading.Lock()  # one sync at a time: scheduled rounds and button presses
 
-    def run_sync_round() -> None:
+    def run_sync_round() -> str | None:
+        """One full round over every shared playlist. Records the outcome for the status line."""
         with Session(engine) as session:
             settings = get_app_settings(session, config.sync_interval)
             token = secrets.decrypt(settings.admin_token_enc)
             if not settings.is_configured or not token:
-                return
-            SyncService(share_service(session, settings)).sync_all()
+                return None
+            try:
+                ok, summary = summarise(SyncService(share_service(session, settings)).sync_all())
+            except Exception as e:  # noqa: BLE001 - e.g. Plex unreachable; recorded, then re-raised
+                session.rollback()
+                ok, summary = False, f"Sync round failed: {_short(e)}"
+                _record_round(session, ok, summary)
+                raise
+            _record_round(session, ok, summary)
+            return summary
+
+    def _record_round(session: Session, ok: bool, summary: str) -> None:
+        settings = get_app_settings(session, config.sync_interval)
+        settings.last_round_at, settings.last_round_ok, settings.last_round_summary = utcnow(), ok, summary
+        session.add(settings)
+        session.commit()
+
+    def attention_count() -> int:
+        """Shared playlists that need the admin: paused, or a member's copy has a problem."""
+        with Session(engine) as session:
+            paused = {g.id for g in session.exec(select(ShareGroup).where(ShareGroup.paused_reason.is_not(None)))}
+            broken = {m.group_id for m in session.exec(select(GroupMember).where(GroupMember.status != "ok"))}
+            return len(paused | broken)
 
     def current_interval() -> int:
         with Session(engine) as session:
@@ -112,6 +134,8 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
 
     def render(request: Request, name: str, status_code: int = 200, **ctx) -> HTMLResponse:
         ctx.setdefault("signed_in", bool(request.session.get("account_id")))
+        if ctx["signed_in"]:
+            ctx.setdefault("attention", attention_count())
         ctx["flashes"] = request.session.pop("flashes", [])
         return templates.TemplateResponse(request, name, ctx, status_code=status_code)
 
@@ -323,8 +347,27 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
             except (UserNeedsAttention, PlexError) as e:
                 row["error"] = str(e)
             rows.append(row)
+        next_due = None
+        if settings.last_round_at:
+            last = settings.last_round_at
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
+            next_due = max(0, int(settings.poll_interval - (datetime.now(timezone.utc) - last).total_seconds()))
         return render(request, "dashboard.html", settings=settings, rows=rows, error=error,
-                      shared=shared, groups=groups, group_members=group_members, names=names)
+                      shared=shared, groups=groups, group_members=group_members, names=names,
+                      next_due=next_due)
+
+    @app.post("/sync")
+    async def sync_all(request: Request, settings: AppSettings = Depends(require_admin)):
+        def run():
+            with sync_lock:
+                return run_sync_round()
+        try:
+            summary = await run_in_threadpool(run)
+            flash(request, f"Synced: {summary}." if summary else "Nothing to sync.", "success")
+        except Exception as e:  # noqa: BLE001
+            flash(request, f"Sync failed: {_short(e)}", "error")
+        return RedirectResponse("/", status_code=303)
 
     @app.post("/users/refresh")
     def refresh_users(request: Request, session: Session = Depends(db),

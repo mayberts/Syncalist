@@ -1,7 +1,18 @@
 # Changelog
 
 Docker images: `ghcr.io/mayberts/syncalist:<version>`. `latest` follows the main branch;
-`0.2` follows the newest 0.2.x release; `0.2.0` never changes.
+`0.3` follows the newest 0.3.x release; `0.3.0` never changes.
+
+## 0.3.0 (2026-11-16)
+
+- **Sync all** button on the playlists page runs a full round over every shared playlist.
+- Status line on the playlists page: when the last full sync ran and what it did
+  (checked / updated / paused / failed), when the next one is due, and how many shared
+  playlists need attention.
+- Red badge on **Playlists** in the menu, on every page, when any shared playlist is paused
+  or has a member whose copy has a problem.
+- A failed round (for example, Plex unreachable) is recorded and shown.
+- Phone layout fixes for the menu and the shared playlists table.
 
 ## 0.2.0 (2026-11-16)
 

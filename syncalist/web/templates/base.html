@@ -12,7 +12,7 @@
     <a class="brand" href="/">Syncalist</a>
     {% if signed_in %}
     <nav>
-      <a href="/">Playlists</a>
+      <a href="/">Playlists{% if attention %} <span class="badge" title="{{ attention }} shared playlist{{ 's' if attention != 1 }} need{{ 's' if attention == 1 }} attention">{{ attention }}</span>{% endif %}</a>
       <a href="/backups">Backups</a>
       <a href="/settings">Settings</a>
       <form method="post" action="/logout"><button class="link">Sign out</button></form>

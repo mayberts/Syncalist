@@ -31,6 +31,22 @@ class SyncReport:
     messages: list[str] = field(default_factory=list)
 
 
+def summarise(reports: list["SyncReport"]) -> tuple[bool, str]:
+    """(ok, one-line summary) for a full round."""
+    if not reports:
+        return True, "No shared playlists yet"
+    changed = sum(r.changed for r in reports)
+    paused = sum(r.paused for r in reports)
+    failed = sum(bool(r.messages) for r in reports)
+    parts = [f"{len(reports)} shared playlist{'s' if len(reports) != 1 else ''} checked"]
+    parts.append(f"{changed} updated" if changed else "no changes")
+    if paused:
+        parts.append(f"{paused} paused")
+    if failed:
+        parts.append(f"{failed} failed")
+    return failed == 0, ", ".join(parts)
+
+
 class SyncService:
     def __init__(self, shares: ShareService):
         self.shares = shares

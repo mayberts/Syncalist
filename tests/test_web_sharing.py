@@ -114,3 +114,47 @@ def test_scheduler_round_runs_against_configured_app(configured, app, plex):
     plex.edit(KATE_ID, 253611, [4, 3, 2, 1])
     app.state.run_sync_round()
     assert plex.items(ADMIN_ID, 11) == [4, 3, 2, 1]
+
+
+def test_sync_all_and_status_line(configured, plex, app):
+    assert "Sync all" not in configured.get("/").text  # nothing shared yet
+    configured.post("/share", data={"user_id": ADMIN_ID, "playlist_key": 11, "recipient": KATE_ID,
+                                    f"mode_{KATE_ID}": "replace"})
+    page = configured.get("/").text
+    assert "Sync all" in page and "Waiting for the first sync round" in page
+
+    plex.edit(KATE_ID, 253611, [1, 2, 3, 4, 9])
+    r = configured.post("/sync")
+    assert r.status_code == 303
+    page = configured.get("/").text
+    assert "Synced: 1 shared playlist checked, 1 updated." in page
+    assert "Last full sync just now: 1 shared playlist checked, 1 updated." in page
+    assert plex.items(ADMIN_ID, 11) == [1, 2, 3, 4, 9]
+
+    app.state.run_sync_round()  # a scheduled round with nothing to do
+    assert "1 shared playlist checked, no changes." in configured.get("/").text
+
+
+def test_attention_badge(configured, plex):
+    plex.add_playlist(ADMIN_ID, "Big", list(range(1, 21)), key=50)
+    configured.post("/share", data={"user_id": ADMIN_ID, "playlist_key": 50, "recipient": CLEO_ID})
+    assert 'class="badge"' not in configured.get("/settings").text
+    cleo_key = [k for k, p in plex.playlists[CLEO_ID].items() if p["title"] == "Big"][0]
+    plex.edit(CLEO_ID, cleo_key, [1])
+    configured.post("/sync")
+    for page in ("/", "/settings", "/backups"):
+        text = configured.get(page).text
+        assert 'class="badge"' in text and ">1</span>" in text
+    assert "1 shared playlist needs attention." in configured.get("/").text
+    assert "1 paused" in configured.get("/").text
+
+
+def test_failed_round_is_shown(configured, plex, monkeypatch):
+    configured.post("/share", data={"user_id": ADMIN_ID, "playlist_key": 10, "recipient": CLEO_ID})
+    import syncalist.web.app as appmod
+    monkeypatch.setattr(appmod.SyncService, "sync_all",
+                        lambda self: (_ for _ in ()).throw(RuntimeError("Plex unreachable <html>x</html>")))
+    configured.post("/sync")
+    page = configured.get("/").text
+    assert "Sync failed: Plex unreachable" in page and "Sync round failed: Plex unreachable" in page
+    assert "&lt;html" not in page

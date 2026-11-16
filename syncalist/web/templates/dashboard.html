@@ -5,13 +5,30 @@
     <h1>Music playlists</h1>
     <p class="muted">{{ settings.server_name }} · {{ settings.music_section_title }} library</p>
   </div>
-  <form method="post" action="/users/refresh"><button>Refresh users</button></form>
+  <div class="actions">
+    {% if groups %}<form method="post" action="/sync"><button class="primary">Sync all</button></form>{% endif %}
+    <form method="post" action="/users/refresh"><button>Refresh users</button></form>
+  </div>
 </div>
+{% if groups %}
+<div class="statusline {{ 'bad' if settings.last_round_ok == false else '' }}">
+  <span class="dot {{ 'bad' if settings.last_round_ok == false or attention else 'ok' }}"></span>
+  <span class="text">
+  {% if settings.last_round_at %}
+    Last full sync {{ settings.last_round_at|ago }}: {{ settings.last_round_summary }}.
+    Next {% if next_due %}in about {{ next_due }} s{% else %}any moment{% endif %} (every {{ settings.poll_interval }} s).
+  {% else %}
+    Waiting for the first sync round (every {{ settings.poll_interval }} s).
+  {% endif %}
+  {% if attention %}<strong class="bad">{{ attention }} shared playlist{{ 's' if attention != 1 }} need{{ 's' if attention == 1 }} attention.</strong>{% endif %}
+  </span>
+</div>
+{% endif %}
 {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
 {% if groups %}
 <section class="card">
   <h2>Shared playlists</h2>
-  <table>
+  <table class="shares">
     <thead><tr><th>Playlist</th><th>Shared with</th><th class="num">Tracks</th><th>Last synced</th><th>Status</th></tr></thead>
     <tbody>
     {% for g in groups %}{% set ms = group_members[g.id] %}
