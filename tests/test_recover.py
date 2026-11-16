@@ -43,3 +43,15 @@ def test_recover_dry_run_then_apply(tmp_path, capsys):
         assert b.track_keys == [10, 20, 30] and b.user_id == 7
         assert b.reason == "Recovered from Plex database backup 2026-11-15"
     assert not (tmp_path / "com.plexapp.plugins.library.db-2026-11-15-wal").exists()
+
+
+def test_find_and_empty_database_guidance(tmp_path, capsys):
+    config = Config(data_dir=tmp_path)
+    plex_db = tmp_path / "plex.db"
+    make_plex_db(plex_db)
+    assert main([str(plex_db), "--find", "road"], config) == 0
+    assert "253611: “Road Trip”: 3 tracks" in capsys.readouterr().out
+    assert main([str(plex_db), "--apply"], config) == 1
+    assert "--find" in capsys.readouterr().out
+    assert main([str(plex_db), "--playlist", "253611", "--user", "Kate"], config) == 1
+    assert "Finish setup" in capsys.readouterr().out

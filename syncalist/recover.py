@@ -8,6 +8,7 @@ Usage (inside the Syncalist container):
     python -m syncalist.recover /config/plex-backup.db            # show what would be recovered
     python -m syncalist.recover /config/plex-backup.db --apply    # add them to the Backups page
     python -m syncalist.recover /config/plex-backup.db --playlist 253611 --user Kate --apply
+    python -m syncalist.recover /config/plex-backup.db --find "Road Trip"    # look up playlist ids by name
 """
 
 import argparse
@@ -56,11 +57,25 @@ def main(argv: list[str] | None = None, config: Config | None = None) -> int:
     ap.add_argument("--apply", action="store_true", help="Add the recovered playlists to the Backups page")
     ap.add_argument("--playlist", type=int, action="append", help="Playlist id (default: all Syncalist touched)")
     ap.add_argument("--user", help="Owner's name, required with --playlist for playlists Syncalist never touched")
+    ap.add_argument("--find", metavar="TITLE", help="List playlists in the backup whose name contains TITLE")
     args = ap.parse_args(argv)
 
     if not args.plex_db.is_file():
         print(f"Not found: {args.plex_db}")
         return 1
+    if args.find:
+        con = open_readonly(args.plex_db)
+        rows = con.execute(
+            "SELECT m.id, m.title, (SELECT COUNT(*) FROM play_queue_generators g WHERE g.playlist_id = m.id) "
+            "FROM metadata_items m WHERE m.metadata_type = 15 AND m.title LIKE ? ORDER BY m.title, m.id",
+            (f"%{args.find}%",)).fetchall()
+        if not rows:
+            print(f"No playlists matching {args.find!r} in this backup.")
+        for pid, title, count in rows:
+            print(f"  {pid}: “{title}”: {count} tracks")
+        print("\nRecover one with:  --playlist <id> --user <owner's name>   (add --apply to save it)")
+        return 0
+
     config = config or Config()
     session = Session(make_engine(f"sqlite:///{config.db_path}"))
     users = {u.id: u for u in session.exec(select(HomeUser)).all()}
@@ -74,7 +89,9 @@ def main(argv: list[str] | None = None, config: Config | None = None) -> int:
             elif args.user:
                 match = [u for u in users.values() if u.title.lower() == args.user.lower()]
                 if not match:
-                    print(f"No Home user called {args.user!r}. Known: {[u.title for u in users.values()]}")
+                    known = [u.title for u in users.values()]
+                    hint = "" if known else " Finish setup in the web UI first so Syncalist knows your Home users."
+                    print(f"No Home user called {args.user!r}. Known: {known}.{hint}")
                     return 1
                 targets[key] = match[0].id
             else:
@@ -82,6 +99,11 @@ def main(argv: list[str] | None = None, config: Config | None = None) -> int:
                 return 1
     else:
         targets = owners
+        if not targets:
+            print("Syncalist has no record of touching any playlists (for example, its database is new).\n"
+                  "Name them instead:  --playlist <id> --user <owner's name>\n"
+                  "Find ids by name:   --find \"Road Trip\"")
+            return 1
 
     stamp = args.plex_db.name.rsplit("-", 3)[-3:] if args.plex_db.name.count("-") >= 3 else None
     source = "-".join(stamp) if stamp else args.plex_db.name
