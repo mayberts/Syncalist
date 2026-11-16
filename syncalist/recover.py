@@ -2,11 +2,11 @@
 
 Plex keeps a copy of its database every few days (com.plexapp.plugins.library.db-YYYY-MM-DD).
 This reads, read-only, the playlists Syncalist has touched from such a copy and adds them to
-Syncalist's Backups page, where "Restore" recreates them as new playlists.
+the Backups section of Syncalist's History page, where "Restore" recreates them as new playlists.
 
 Usage (inside the Syncalist container):
     python -m syncalist.recover /config/plex-backup.db            # show what would be recovered
-    python -m syncalist.recover /config/plex-backup.db --apply    # add them to the Backups page
+    python -m syncalist.recover /config/plex-backup.db --apply    # add them to the History page
     python -m syncalist.recover /config/plex-backup.db --playlist 253611 --user Kate --apply
     python -m syncalist.recover /config/plex-backup.db --find "Road Trip"    # look up playlist ids by name
 """
@@ -54,7 +54,7 @@ def touched_playlists(session: Session) -> dict[int, int]:
 def main(argv: list[str] | None = None, config: Config | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("plex_db", type=Path, help="Copy of a Plex database backup file")
-    ap.add_argument("--apply", action="store_true", help="Add the recovered playlists to the Backups page")
+    ap.add_argument("--apply", action="store_true", help="Add the recovered playlists to the History page")
     ap.add_argument("--playlist", type=int, action="append", help="Playlist id (default: all Syncalist touched)")
     ap.add_argument("--user", help="Owner's name, required with --playlist for playlists Syncalist never touched")
     ap.add_argument("--find", metavar="TITLE", help="List playlists in the backup whose name contains TITLE")
@@ -126,9 +126,9 @@ def main(argv: list[str] | None = None, config: Config | None = None) -> int:
                 reason=f"Recovered from Plex database backup {source}", taken_at=datetime.now(timezone.utc)))
     if args.apply:
         session.commit()
-        print(f"\nAdded {found} playlist(s) to the Backups page. Use Restore there to recreate them.")
+        print(f"\nAdded {found} playlist(s) to the History page. Use Restore there to recreate them.")
     else:
-        print("\nNothing changed. Run again with --apply to add these to the Backups page.")
+        print("\nNothing changed. Run again with --apply to add these to the History page.")
     return 0
 
 
