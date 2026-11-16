@@ -33,6 +33,7 @@ PIN_TIMEOUT_S = 300
 MIN_INTERVAL, MAX_INTERVAL = 15, 3600
 DEFAULT_RETENTION_DAYS, MIN_RETENTION, MAX_RETENTION = 90, 7, 3650
 HISTORY_PAGE = 50
+THUMB_SIZE = 96  # px; shown at 32-40 px, so sharp on high-DPI screens
 
 GatewayFactory = Callable[[str, str], Gateway]
 
@@ -345,6 +346,7 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
             users, error = svc.all(), f"Couldn't load Home users from plex.tv: {e}"
         shares = ShareService(session, svc)
         shared = shares.member_index()
+        thumbs: dict[tuple[int, int], str] = {}
         groups = shares.groups()
         group_members = {g.id: shares.members(g) for g in groups}
         names = {u.id: u.title for u in users}
@@ -353,9 +355,18 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
             row = {"user": user, "playlists": [], "error": None}
             try:
                 row["playlists"] = svc.call_as(user, svc.gateway.playlists)
+                thumbs.update({(user.id, p.key): p.thumb for p in row["playlists"] if p.thumb})
             except (UserNeedsAttention, PlexError) as e:
                 row["error"] = str(e)
             rows.append(row)
+        # A shared playlist's thumbnail: the owner's copy if we have it, else any member's.
+        group_thumbs = {}
+        for g in groups:
+            ms = sorted(group_members[g.id], key=lambda m: m.user_id != g.owner_user_id)
+            hit = next(((m.user_id, thumbs[(m.user_id, m.playlist_key)]) for m in ms
+                        if (m.user_id, m.playlist_key) in thumbs), None)
+            if hit:
+                group_thumbs[g.id] = hit
         next_due = None
         if settings.last_round_at:
             last = settings.last_round_at
@@ -364,6 +375,7 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
             next_due = max(0, int(settings.poll_interval - (datetime.now(timezone.utc) - last).total_seconds()))
         return render(request, "dashboard.html", settings=settings, rows=rows, error=error,
                       shared=shared, groups=groups, group_members=group_members, names=names,
+                      group_thumbs=group_thumbs,
                       next_due=next_due)
 
     @app.post("/sync")
@@ -493,6 +505,23 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
                       has_poster=has_poster, has_art=has_art,
                       candidates=candidates, events=group_events(shares.events(group, limit=30)),
                       owner=session.get(HomeUser, group.owner_user_id))
+
+    @app.get("/users/{user_id}/thumb")
+    def playlist_thumb(user_id: int, path: str, session: Session = Depends(db),
+                       settings: AppSettings = Depends(require_admin)):
+        """Small poster thumbnail for one of a user's playlists. `path` is the Plex image path
+        from the playlist listing; it includes a version stamp, so it's safe to cache."""
+        if not path.startswith(("/playlists/", "/library/metadata/")):
+            return Response(status_code=400)
+        user = session.get(HomeUser, user_id)
+        if user is None:
+            return Response(status_code=404)
+        svc = UserService(session, secrets, gateway_for(settings))
+        try:
+            data = svc.call_as(user, lambda t: svc.gateway.thumbnail(t, path, THUMB_SIZE))
+        except (UserNeedsAttention, PlexError):
+            return Response(status_code=404)
+        return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=604800"})
 
     @app.get("/groups/{group_id}/image/{kind}")
     def group_image(group_id: int, kind: str, session: Session = Depends(db),

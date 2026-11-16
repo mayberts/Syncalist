@@ -232,3 +232,19 @@ def test_share_applies_owner_artwork_and_page_shows_it(configured, plex):
     img = configured.get(f"{gid}/image/poster")
     assert img.status_code == 200 and img.headers["content-type"] == "image/png" and img.content == b"\x89PNG-poster"
     assert configured.get(f"{gid}/image/art").status_code == 404
+
+
+def test_dashboard_shows_playlist_thumbnails(configured, plex):
+    plex.set_image(ADMIN_ID, 11, "poster", b"P")
+    configured.post("/share", data={"user_id": ADMIN_ID, "playlist_key": 11, "recipient": KATE_ID,
+                                    f"mode_{KATE_ID}": "replace"})
+    page = configured.get("/").text
+    poster_path = plex.playlists[ADMIN_ID][11]["poster"]
+    from urllib.parse import quote
+    assert f'/users/{ADMIN_ID}/thumb?path={quote(poster_path, safe="/")}' in page  # custom poster
+    assert f'/users/{ADMIN_ID}/thumb?path=/playlists/10/composite/' in page  # Plex's collage
+    assert page.count('class="thumb"') >= 6
+    r = configured.get(f"/users/{ADMIN_ID}/thumb", params={"path": poster_path})
+    assert r.status_code == 200 and r.content == f"thumb:96:{poster_path}".encode()
+    assert "max-age" in r.headers["cache-control"]
+    assert configured.get(f"/users/{ADMIN_ID}/thumb", params={"path": "http://evil/x"}).status_code == 400

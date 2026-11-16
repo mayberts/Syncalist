@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from urllib.parse import urlencode
+
 import requests
 from plexapi.exceptions import BadRequest, NotFound, Unauthorized
 from plexapi.myplex import MyPlexAccount
@@ -63,6 +65,7 @@ class PlaylistSummary:
     track_count: int
     updated_at: datetime | None
     smart: bool
+    thumb: str | None = None  # Plex path of the poster: custom if set, else the automatic collage
 
 
 @dataclass(frozen=True)
@@ -103,6 +106,7 @@ class Gateway(Protocol):
     def download_image(self, user_token: str, path: str) -> bytes: ...
     def upload_image(self, user_token: str, playlist_key: int, kind: str, data: bytes) -> None: ...
     def set_summary(self, user_token: str, playlist_key: int, summary: str) -> None: ...
+    def thumbnail(self, user_token: str, path: str, size: int) -> bytes: ...
 
 
 def _wrap(fn):
@@ -310,6 +314,16 @@ class PlexApiGateway:
         srv.query(f"/library/metadata/{playlist_key}/{endpoint}", method=srv._session.post, data=data)
 
     @_wrap
+    def thumbnail(self, user_token: str, path: str, size: int) -> bytes:
+        """A small JPEG of a Plex image, resized by Plex's photo transcoder."""
+        srv = self._user_server(user_token)
+        query = urlencode({"width": size, "height": size, "minSize": 1, "upscale": 1, "url": path})
+        r = srv._session.get(srv.url(f"/photo/:/transcode?{query}", includeToken=True), timeout=TIMEOUT)
+        if r.status_code != 200 or not r.content:
+            raise PlexError(f"Couldn't fetch thumbnail ({r.status_code})")
+        return r.content
+
+    @_wrap
     def set_summary(self, user_token: str, playlist_key: int, summary: str) -> None:
         self._fetch_playlist(user_token, playlist_key).editSummary(summary)
 
@@ -463,8 +477,11 @@ def _join(args: dict) -> str:
 def _summary(p) -> PlaylistSummary:
     # plexapi returns naive local times; make them timezone-aware for storage and comparison.
     updated = p.updatedAt.astimezone() if p.updatedAt else None
+    data = getattr(p, "_data", None)
+    attrib = data.attrib if data is not None else {}
+    thumb = attrib.get("thumb") or attrib.get("composite") or getattr(p, "composite", None)
     return PlaylistSummary(key=int(p.ratingKey), title=p.title, track_count=int(p.leafCount or 0),
-                           updated_at=updated, smart=bool(p.smart))
+                           updated_at=updated, smart=bool(p.smart), thumb=thumb)
 
 
 def _track(t) -> Track:

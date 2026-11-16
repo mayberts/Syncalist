@@ -148,7 +148,8 @@ class FakeGateway:
 
     def _summary(self, key, pl):
         count = self.plex.hidden_count.get(key, len(pl["items"]))
-        return PlaylistSummary(key, pl["title"], count, pl["updated"], pl["smart"])
+        thumb = pl.get("poster") or f"/playlists/{key}/composite/{int(pl['updated'].timestamp())}"
+        return PlaylistSummary(key, pl["title"], count, pl["updated"], pl["smart"], thumb)
 
     def playlists(self, token):
         uid = self.plex.user_for_token(token)
@@ -221,6 +222,10 @@ class FakeGateway:
         uid, _ = self._pl(token, key)
         self.plex.uploads = getattr(self.plex, "uploads", 0) + 1
         self.plex.set_image(uid, key, kind, data)
+
+    def thumbnail(self, token, path, size):
+        self.plex.user_for_token(token)
+        return f"thumb:{size}:{path}".encode()
 
     def set_summary(self, token, key, summary):
         _, pl = self._pl(token, key)

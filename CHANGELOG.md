@@ -3,6 +3,12 @@
 Docker images: `ghcr.io/mayberts/syncalist:<version>`. `latest` follows the main branch;
 `0.5` follows the newest 0.5.x release; `0.5.0` never changes.
 
+## 0.5.1 (2026-11-16)
+
+- Playlist poster thumbnails on the playlists page, for every playlist and in the Shared
+  playlists table: the custom poster where one is set, otherwise Plex's automatic collage.
+  Plex resizes them to thumbnail size, and the browser caches them until the poster changes.
+
 ## 0.5.0 (2026-11-16)
 
 - **Artwork and description are shared and kept in sync**: the playlist's poster (icon),

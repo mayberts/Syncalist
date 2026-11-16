@@ -33,7 +33,7 @@
     <tbody>
     {% for g in groups %}{% set ms = group_members[g.id] %}
       <tr>
-        <td><a href="/groups/{{ g.id }}">{{ g.name }}</a></td>
+        <td><a class="pl" href="/groups/{{ g.id }}">{% set t = group_thumbs.get(g.id) %}{% if t %}<img class="thumb" src="/users/{{ t[0] }}/thumb?path={{ t[1]|urlencode }}" alt="" loading="lazy" width="36" height="36">{% else %}<span class="thumb"></span>{% endif %}<span>{{ g.name }}</span></a></td>
         <td>{% for m in ms %}{{ names.get(m.user_id, "?") }}{{ ", " if not loop.last }}{% endfor %}</td>
         <td class="num">{{ g.base_snapshot|length }}</td>
         <td class="muted">{{ g.last_synced_at|ago }}</td>
@@ -65,7 +65,7 @@
       <tbody>
       {% for p in row.playlists %}
         <tr>
-          <td><a href="/users/{{ row.user.id }}/playlists/{{ p.key }}">{{ p.title }}</a>{% if p.smart %} <span class="tag">smart</span>{% endif %}</td>
+          <td><a class="pl" href="/users/{{ row.user.id }}/playlists/{{ p.key }}">{% if p.thumb %}<img class="thumb" src="/users/{{ row.user.id }}/thumb?path={{ p.thumb|urlencode }}" alt="" loading="lazy" width="36" height="36">{% else %}<span class="thumb"></span>{% endif %}<span>{{ p.title }}</span></a>{% if p.smart %} <span class="tag">smart</span>{% endif %}</td>
           <td class="num">{{ p.track_count }}</td>
           <td class="muted">{{ p.updated_at|ago }}</td>
           <td class="num">
