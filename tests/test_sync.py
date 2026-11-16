@@ -172,3 +172,41 @@ def test_backups_are_pruned(env, plex):
         shares._backup(user, summary, [i], reason=f"r{i}")
     kept = [b for b in shares.backups() if b.playlist_key == 10]
     assert len(kept) == 10 and {b.reason for b in kept} == {f"r{i}" for i in range(5, 15)}
+
+
+def test_new_addition_is_never_removed_even_if_merge_drops_it(env, plex, monkeypatch):
+    shares, sync = env
+    g, keys = shared_road_trip(shares, plex)
+    plex.edit(KATE_ID, keys[KATE_ID], [1, 2, 3, 4, 9])
+    import syncalist.sync.engine as engine_mod
+    real_merge = engine_mod.merge
+    # Simulate an unknown bug that loses Kate's addition (and also makes another change).
+    def buggy(base, edits):
+        r = real_merge(base, edits)
+        r.tracks = [k for k in r.tracks if k != 9 and k != 1]
+        return r
+    monkeypatch.setattr(engine_mod, "merge", buggy)
+    sync.sync_group(g)
+    assert plex.items(KATE_ID, keys[KATE_ID]) == [1, 2, 3, 4, 9]  # protected
+    kate = [m for m in shares.members(g) if m.user_id == KATE_ID][0]
+    assert kate.status == "error" and "just added" in kate.status_detail
+
+
+def test_each_write_is_logged(env, plex):
+    shares, sync = env
+    g, keys = shared_road_trip(shares, plex)
+    plex.edit(KATE_ID, keys[KATE_ID], [1, 2, 3, 4, 9])
+    sync.sync_group(g)
+    msgs = [e.message for e in shares.events(g)]
+    assert "Updated Nick's copy: +1 −0 (4 → 5 tracks)" in msgs
+    assert "Updated Cleo's copy: +1 −0 (4 → 5 tracks)" in msgs
+
+
+def test_addition_detected_even_if_plex_does_not_bump_updated_at(env, plex):
+    shares, sync = env
+    g, keys = shared_road_trip(shares, plex)
+    pl = plex.playlists[KATE_ID][keys[KATE_ID]]
+    pl["items"] = pl["items"] + [9]  # added from a Plex app; updatedAt NOT changed
+    plex.edit(CLEO_ID, keys[CLEO_ID], [1, 2, 3])  # and someone else changes something
+    sync.sync_group(g)
+    assert set(map(tuple, all_items(plex, keys).values())) == {(1, 2, 3, 9)}

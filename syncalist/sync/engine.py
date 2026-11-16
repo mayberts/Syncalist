@@ -1,8 +1,9 @@
 """The sync engine (M3): keeps every member's copy of a shared playlist the same.
 
 One round for a group:
-  1. Detect: ask Plex for each member's playlist summary. Unchanged `updatedAt` = no edits.
-  2. Read: for changed members only, read the full track list (verified complete).
+  1. Detect: ask Plex for each member's playlist summary (deleted? renamed?).
+  2. Read: read every member's full track list (verified complete). updatedAt is NOT used to
+     skip reads: it isn't reliably bumped when a track is added from a Plex app.
   3. Merge: diff each against what they had after our last write; combine (merge.py).
   4. Guard: a round that would remove a lot is paused for the admin to confirm.
   5. Write: back up anyone losing tracks, then update each copy, unless that member edited it
@@ -59,6 +60,7 @@ class SyncService:
         # 1-2. detect and read --------------------------------------------------------------------
         seen: dict[int, tuple[GroupMember, HomeUser, PlaylistSummary]] = {}
         current: dict[int, list[int]] = {}  # member id -> tracks now (read or assumed)
+        prevs: dict[int, list[int]] = {}  # member id -> what they had after our last write
         edits: list[Edit] = []
         blocked: set[int] = set()
         read_ids: set[int] = set()
@@ -81,11 +83,9 @@ class SyncService:
                 renames.append((summary.updated_at, user.title, summary.title))
 
             prev = m.last_known if m.last_known is not None else [k for k in base if k not in set(m.skipped)]
-            unchanged = (m.status == "ok" and m.last_seen_updated_at is not None
-                         and summary.updated_at == m.last_seen_updated_at)
-            if unchanged:
-                current[m.id] = prev
-                continue
+            prevs[m.id] = prev
+            # Always read every copy. Plex's updatedAt can't be relied on to change when a track is
+            # added from a Plex app, and assuming "unchanged" once led to overwriting a new addition.
             try:
                 keys = self.shares._read_keys(user, summary, group)
             except ReadMismatch as e:
@@ -136,7 +136,7 @@ class SyncService:
         for mid, (m, user, summary) in seen.items():
             if mid in blocked:
                 continue
-            self._write_member(group, m, user, summary, current[mid])
+            self._write_member(group, m, user, summary, current[mid], prev=prevs.get(mid))
         group.last_synced_at = utcnow()
         self.session.add(group)
         self.session.commit()
@@ -163,8 +163,18 @@ class SyncService:
 
     # ------------------------------------------------------------------------------------------------------
     def _write_member(self, group: ShareGroup, m: GroupMember, user: HomeUser, summary: PlaylistSummary,
-                      current: list[int], check_unchanged: bool = True) -> None:
+                      current: list[int], check_unchanged: bool = True, prev: list[int] | None = None) -> None:
         want = [k for k in group.base_snapshot if k not in set(m.skipped)]
+        if prev is not None:
+            # Safety net: never remove a track this person has just added.
+            own_new = [k for k in current if k not in set(prev)]
+            would_lose = [k for k in own_new if k not in set(group.base_snapshot)]
+            if would_lose:
+                self._member_error(group, m, user,
+                                   f"Stopped before updating {user.title}'s copy: it would have removed "
+                                   f"{len(would_lose)} track(s) they just added ({would_lose[:5]}). "
+                                   f"Had {len(prev)}, now {len(current)}, shared list {len(group.base_snapshot)}.")
+                return
         if current == want and summary.title == group.name:
             m.last_known = current
             m.last_seen_updated_at = summary.updated_at
@@ -194,6 +204,11 @@ class SyncService:
             self._member_error(group, m, user, f"Couldn't update {user.title}'s copy: {e}")
             return
         expected = [k for k in group.base_snapshot if k not in set(skipped)]
+        plus = len([k for k in actual if k not in set(current)])
+        minus = len([k for k in current if k not in set(actual)])
+        moved = "" if plus or minus or actual == current else ", reordered"
+        self.shares._log(group, f"Updated {user.title}'s copy: +{plus} −{minus}{moved} "
+                                f"({len(current)} → {len(actual)} tracks)", user)
         m.skipped = skipped
         m.last_known = actual
         m.last_seen_updated_at = after.updated_at if after else None
