@@ -204,11 +204,24 @@ class PlexApiGateway:
         disappear from the library, which was seen on a real server: 81 stored, 28 real.)"""
         srv = self._user_server(user_token)
         self._fetch_playlist(user_token, playlist_key)  # checks it's a regular music playlist
-        data = srv.query(f"/playlists/{playlist_key}/items",
-                         headers={"X-Plex-Container-Start": "0", "X-Plex-Container-Size": "100000"})
-        keys = [int(el.attrib["ratingKey"]) for el in data if el.attrib.get("ratingKey")]
-        total = data.attrib.get("totalSize") or data.attrib.get("size")
-        if total is not None and int(total) != len(keys):
+        return self._read_all_keys(srv, playlist_key)
+
+    @staticmethod
+    def _read_all_keys(srv, playlist_key: int, page: int = 500) -> list[int]:
+        """Read the playlist page by page; check the total against what Plex says it sent."""
+        keys: list[int] = []
+        total = None
+        while True:
+            data = srv.query(f"/playlists/{playlist_key}/items",
+                             headers={"X-Plex-Container-Start": str(len(keys)), "X-Plex-Container-Size": str(page)})
+            batch = [int(el.attrib["ratingKey"]) for el in data if el.attrib.get("ratingKey")]
+            raw_total = data.attrib.get("totalSize")
+            if raw_total is not None:
+                total = int(raw_total)
+            keys += batch
+            if not batch or total is None or len(keys) >= total:
+                break
+        if total is not None and total != len(keys):
             raise PlexError(f"Plex returned {len(keys)} of {total} tracks for playlist {playlist_key}")
         return keys
 

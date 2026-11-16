@@ -104,3 +104,32 @@ def test_removal_refused_changes_nothing():
 def test_duplicates_removed_even_without_allow_removals():
     srv, _ = run([1, 2, 2, 3], [1, 2, 3, 4], allow_removals=False)
     assert srv.items == [1, 2, 3, 4]
+
+
+class PagedServer:
+    """Returns at most `cap` items per request, like a server that limits page size."""
+
+    def __init__(self, n, cap, lie_total=None):
+        self.items, self.cap, self.lie_total = list(range(1, n + 1)), cap, lie_total
+        self.calls = 0
+
+    def query(self, path, headers):
+        from xml.etree.ElementTree import Element, SubElement
+        self.calls += 1
+        start, size = int(headers["X-Plex-Container-Start"]), int(headers["X-Plex-Container-Size"])
+        chunk = self.items[start:start + min(size, self.cap)]
+        root = Element("MediaContainer", size=str(len(chunk)),
+                       totalSize=str(self.lie_total or len(self.items)), offset=str(start))
+        for k in chunk:
+            SubElement(root, "Track", ratingKey=str(k))
+        return root
+
+
+def test_read_all_keys_pages_through_large_playlists():
+    srv = PagedServer(841, cap=100)
+    assert PlexApiGateway._read_all_keys(srv, 5) == list(range(1, 842)) and srv.calls == 9
+
+
+def test_read_all_keys_detects_missing_items():
+    with pytest.raises(Exception, match="returned 841 of 900"):
+        PlexApiGateway._read_all_keys(PagedServer(841, cap=1000, lie_total=900), 5)
