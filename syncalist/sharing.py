@@ -93,7 +93,7 @@ class ShareService:
         source = self._summary(owner, playlist_key)
         if source.smart:
             raise ShareError("Smart playlists can't be shared.")
-        tracks = self._read_keys(owner, source)
+        tracks = self._read_keys(owner, source, group=None)
         if not tracks:
             raise ShareError("That playlist is empty. Add some tracks before sharing it.")
 
@@ -139,7 +139,7 @@ class ShareService:
                     raise ShareError(f"{user.title} no longer has a playlist called “{group.name}”.")
                 if (user.id, existing.key) in shared:
                     raise ShareError(f"{user.title}'s “{existing.title}” is already in another shared playlist.")
-                plans.append((user, mode, existing, self._read_keys(user, existing)))
+                plans.append((user, mode, existing, self._read_keys(user, existing, group)))
             except (UserNeedsAttention, PlexError) as e:
                 self._log(group, f"Couldn't add {user.title}: {e}", user, level="error")
             except ReadMismatch:
@@ -153,7 +153,7 @@ class ShareService:
             for m in existing_members:
                 user = self._user(m.user_id)
                 summary = self._summary(user, m.playlist_key)
-                existing_reads.append((m, user, summary, self._read_keys(user, summary)))
+                existing_reads.append((m, user, summary, self._read_keys(user, summary, group)))
 
         if not plans:
             raise ShareError("Nobody could be added. See the activity log for details.")
@@ -199,13 +199,18 @@ class ShareService:
         self.session.add(group)
         self.session.commit()
 
-    def _read_keys(self, user: HomeUser, summary: PlaylistSummary) -> list[int]:
-        """Read a playlist's tracks and check the count against Plex's own count."""
-        keys = self.users.call_as(user, lambda t: self.gateway.playlist_track_keys(t, summary.key))
+    def _read_keys(self, user: HomeUser, summary: PlaylistSummary, group: ShareGroup | None = None) -> list[int]:
+        """Read a playlist's tracks. The gateway checks the read is complete; a failure there
+        stops the whole operation. Plex's stored count is only reported, because it can be stale."""
+        try:
+            keys = self.users.call_as(user, lambda t: self.gateway.playlist_track_keys(t, summary.key))
+        except PlexError as e:
+            raise ReadMismatch(f"Couldn't read all of {user.title}'s “{summary.title}”, so nothing was "
+                               f"changed: {e}") from e
         if len(keys) != summary.track_count:
-            raise ReadMismatch(
-                f"Plex says {user.title}'s “{summary.title}” has {summary.track_count} tracks, but "
-                f"{len(keys)} were read. That doesn't match, so nothing was changed.")
+            self._log(group, f"Plex's stored count for {user.title}'s “{summary.title}” was out of date "
+                             f"({summary.track_count}); it actually holds {len(keys)} tracks", user,
+                      level="warning")
         return keys
 
     def _push(self, group: ShareGroup, member: GroupMember, allow_removals: bool = False) -> None:
@@ -222,11 +227,13 @@ class ShareService:
             if skipped:
                 self._log(group, f"{len(skipped)} track(s) skipped for {user.title}: no access to them", user,
                           level="warning")
-            expected = len(group.base_snapshot) - len(skipped)
-            if summary.track_count != expected:
+            # Verify by reading the playlist back (Plex's stored count can be stale).
+            expected = [k for k in group.base_snapshot if k not in set(skipped)]
+            actual = self.users.call_as(user, lambda t: self.gateway.playlist_track_keys(t, member.playlist_key))
+            if actual != expected:
                 member.status = "warning"
-                member.status_detail = (f"Plex shows {summary.track_count} tracks to {user.title}, "
-                                        f"expected {expected}")
+                member.status_detail = (f"After updating, {user.title}'s playlist has {len(actual)} tracks; "
+                                        f"expected {len(expected)}")
                 self._log(group, member.status_detail, user, level="warning")
         except (UserNeedsAttention, PlexError, ShareError) as e:
             member.status, member.status_detail = "error", str(e)
@@ -244,7 +251,7 @@ class ShareService:
         if delete_playlist:
             try:
                 summary = self._summary(user, member.playlist_key)
-                keys = self._read_keys(user, summary)
+                keys = self._read_keys(user, summary, group)
                 self._backup(user, summary, keys, reason=f"Before deleting (left shared “{group.name}”)")
                 self.users.call_as(user, lambda t: self.gateway.delete_playlist(t, member.playlist_key))
             except (UserNeedsAttention, PlexError, ShareError) as e:

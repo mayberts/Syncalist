@@ -196,7 +196,20 @@ class PlexApiGateway:
 
     @_wrap
     def playlist_track_keys(self, user_token: str, playlist_key: int) -> list[int]:
-        return [int(i.ratingKey) for i in self._fetch_playlist(user_token, playlist_key).items()]
+        """All track keys, in order. Read in one request and checked against the totalSize Plex
+        reports for that same request, so a short or partial read raises instead of returning.
+
+        (The playlist's stored leafCount is NOT used: Plex leaves it stale when tracks
+        disappear from the library, which was seen on a real server: 81 stored, 28 real.)"""
+        srv = self._user_server(user_token)
+        self._fetch_playlist(user_token, playlist_key)  # checks it's a regular music playlist
+        data = srv.query(f"/playlists/{playlist_key}/items",
+                         headers={"X-Plex-Container-Start": "0", "X-Plex-Container-Size": "100000"})
+        keys = [int(el.attrib["ratingKey"]) for el in data if el.attrib.get("ratingKey")]
+        total = data.attrib.get("totalSize") or data.attrib.get("size")
+        if total is not None and int(total) != len(keys):
+            raise PlexError(f"Plex returned {len(keys)} of {total} tracks for playlist {playlist_key}")
+        return keys
 
     @_wrap
     def create_playlist(self, user_token: str, title: str, track_keys: list[int]) -> PlaylistSummary:

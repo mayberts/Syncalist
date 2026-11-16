@@ -161,3 +161,6 @@ Run against server "Delta" (Plex 1.43.5) as Home user Kate (PIN-protected, manag
 | Same ratingKey for admin and user | ✅ | Copy tracks by ID, no matching needed. |
 | `moveItem` (to top, and after another track) | ✅ | Planner can use single-item moves. |
 | Admin token vs user playlists | The admin's playlist list doesn't include them, but the admin token **can** fetch one by its ratingKey | Not relied on. All reads and writes use the user's own token. |
+| Plex's stored playlist count (`leafCount`) | ⚠️ **Can be stale.** Kate's "Road Trip" showed 81 for months while really holding 28: the 2026-11-15 Plex database backup has 28 entries. Tracks removed from the library aren't subtracted until the playlist next changes. | Never trust `leafCount` for safety checks. Reads are verified against the `totalSize` of the same request, and writes are verified by reading the playlist back. A stale count is logged as a warning. |
+| Merge removing tracks (16 Nov incident) | Investigated. Both "Road Trip" copies were identical 28-track playlists with stale counts (81 and 30), so the merge was correct and no tracks were lost. | Added anyway: read-everything-then-write, no removals except Replace, read-back verification, `/debug/playlist` diagnostics, and `python -m syncalist.recover` for Plex database backups. |
+

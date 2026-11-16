@@ -141,7 +141,7 @@ def test_restore_creates_new_playlist(svc, plex):
 def test_short_read_of_recipient_stops_merge_before_any_write(svc, plex):
     plex.short_reads[253611] = 1  # Kate's Road Trip (3 tracks) reads back as 1
     before_admin, before_kate = list(plex.items(ADMIN_ID, 11)), list(plex.items(KATE_ID, 253611))
-    with pytest.raises(ShareError, match="doesn't match"):
+    with pytest.raises(ShareError, match="Couldn't read all"):
         svc.share(user(svc, ADMIN_ID), 11, {KATE_ID: Mode.MERGE, CLEO_ID: Mode.NEW})
     assert plex.items(ADMIN_ID, 11) == before_admin and plex.items(KATE_ID, 253611) == before_kate
     assert not any(p["title"] == "Road Trip" for p in plex.playlists[CLEO_ID].values())
@@ -150,7 +150,7 @@ def test_short_read_of_recipient_stops_merge_before_any_write(svc, plex):
 
 def test_short_read_of_source_stops_share(svc, plex):
     plex.short_reads[11] = 2
-    with pytest.raises(ShareError, match="doesn't match"):
+    with pytest.raises(ShareError, match="Couldn't read all"):
         svc.share(user(svc, ADMIN_ID), 11, {CLEO_ID: Mode.NEW})
     assert svc.groups() == []
 
@@ -169,9 +169,17 @@ def test_replace_is_the_only_mode_that_removes(svc, plex):
     assert plex.items(KATE_ID, 253611) == [1, 2, 3, 4]
 
 
-def test_plex_showing_fewer_tracks_is_flagged(svc, plex):
+def test_write_that_did_not_take_effect_is_flagged(svc, plex, monkeypatch):
     g = svc.share(user(svc, ADMIN_ID), 10, {CLEO_ID: Mode.NEW})
     cleo = members_by_user(svc, g)[CLEO_ID]
-    plex.hidden_count[cleo.playlist_key] = 1
+    monkeypatch.setattr(svc.gateway, "set_playlist_tracks", lambda *a, **k: [])  # pretend Plex ignored it
+    g.base_snapshot = [1, 2, 3]
     svc._push(g, cleo)
-    assert cleo.status == "warning" and "Plex shows 1 tracks to Cleo, expected 2" in cleo.status_detail
+    assert cleo.status == "warning" and "has 2 tracks; expected 3" in cleo.status_detail
+
+
+def test_stale_plex_count_does_not_block_sharing(svc, plex):
+    plex.hidden_count[253611] = 81  # Plex's stored count says 81, the playlist really holds 3
+    g = svc.share(user(svc, ADMIN_ID), 11, {KATE_ID: Mode.MERGE})
+    assert g.base_snapshot == [1, 2, 3, 4, 5, 6]
+    assert any("out of date (81); it actually holds 3" in e.message for e in svc.events(g))

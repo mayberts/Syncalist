@@ -142,7 +142,9 @@ class FakeGateway:
 
     def playlist_track_keys(self, token, key):
         items = list(self._pl(token, key)[1]["items"])
-        return items[:self.plex.short_reads[key]] if key in self.plex.short_reads else items
+        if key in self.plex.short_reads:  # the real gateway detects this via totalSize and raises
+            raise PlexError(f"Plex returned {self.plex.short_reads[key]} of {len(items)} tracks")
+        return items
 
     def tracks_info(self, keys):
         return [self.plex.catalog[k] for k in keys if k in self.plex.catalog]
