@@ -142,4 +142,19 @@ services:
 
 ## 8. Open questions
 
-None at the moment. Everything decided is in section 1. New questions will be added here as the M0 spike turns things up.
+1. **Does the no-PIN token act as the user?** The no-PIN token method returned a token, but the first run couldn't tell whose playlists it sees. If it sees the user's own playlists, PINs aren't needed at all and setup is simpler. If not, the PIN method (proven below) stays. Needs one more `--read-only` run of the updated spike.
+
+## 9. M0 spike results (2026-11-16)
+
+Run against server "Delta" (Plex 1.43.5) as Home user Kate (PIN-protected, managed), with python-plexapi 4.18.3.
+
+| Assumption | Result | Effect on the design |
+|---|---|---|
+| Admin token can list Home users | ✅ 4 users, all managed, 2 with PINs | As planned. |
+| Switching to a PIN user with their PIN gives a server token | ✅ `switchHomeUser(user, pin)` + matching resource `accessToken` | **This is the token method.** |
+| Reading a user's music playlists | ✅ Fast: an 841-track playlist loads in 0.7 s | Polling every 60 s is cheap. Full reads are fine even for big playlists. |
+| `updatedAt` changes on add / remove / move / rename | ✅ Every operation | Change detection by `updatedAt` works. Renames are detectable. |
+| Duplicates | Plex **silently ignores** adding a track that's already in the playlist (`updatedAt` still changes) | "No duplicates" comes free. The merge still dedupes, to be safe. Echo suppression must not assume `updatedAt` means the content changed: compare track lists too. |
+| Same ratingKey for admin and user | ✅ | Copy tracks by ID, no matching needed. |
+| `moveItem` (to top, and after another track) | ✅ | Planner can use single-item moves. |
+| Admin token vs user playlists | The admin's playlist list doesn't include them, but the admin token **can** fetch one by its ratingKey | Not relied on. All reads and writes use the user's own token. |

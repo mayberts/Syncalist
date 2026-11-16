@@ -157,8 +157,9 @@ def main():
         if not tok:
             raise RuntimeError("plex.tv returned no shared-server token for this user")
         srv = PlexServer(args.url, tok)
+        ctx["nopin_server"] = srv
         ctx.setdefault("user_server", srv)
-        return {"got_token": True, "server_reports_user": srv.myPlexUsername or "(blank)"}
+        return {"got_token": True}
     step("Get user's server token WITHOUT PIN (get_token)", token_without_pin)
 
     # 3b. Token with PIN (switchHomeUser) --------------------------------------
@@ -194,6 +195,19 @@ def main():
         return {"count": len(out), "playlists": out,
                 "admin_can_see_user_playlists": any(k in admin_keys for k in ctx["user_pl_keys"])}
     step("Read user's music playlists", read_playlists)
+
+    def compare_tokens():
+        """Whose playlists does the no-PIN token actually see?"""
+        def keys(srv):
+            return sorted(p.ratingKey for p in srv.playlists(playlistType="audio"))
+        nopin = keys(ctx["nopin_server"])
+        res = {"nopin_token_playlist_count": len(nopin),
+               "nopin_sees_same_as_admin": nopin == keys(admin)}
+        if ctx["user_server"] is not ctx["nopin_server"]:
+            res["nopin_sees_same_as_pin_user"] = nopin == keys(ctx["user_server"])
+        return res
+    if "nopin_server" in ctx:
+        step("Compare no-PIN token with PIN token", compare_tokens)
 
     def time_largest():
         pls = [p for p in usrv.playlists(playlistType="audio") if not p.smart]
@@ -278,7 +292,7 @@ def main():
                 return {"admin_can_fetch_user_playlist": True}
             except (NotFound, Unauthorized, BadRequest):
                 return {"admin_can_fetch_user_playlist": False}
-        step("Check playlist is private to user", admin_cannot_edit)
+        step("Can the admin token fetch the user's playlist by key?", admin_cannot_edit)
 
     finally:
         pl = pl_holder.get("pl")
