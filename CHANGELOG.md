@@ -1,7 +1,22 @@
 # Changelog
 
 Docker images: `ghcr.io/mayberts/syncalist:<version>`. `latest` follows the main branch;
-`0.4` follows the newest 0.4.x release; `0.4.0` never changes.
+`0.5` follows the newest 0.5.x release; `0.5.0` never changes.
+
+## 0.5.0 (2026-11-16)
+
+- **Artwork and description are shared and kept in sync**: the playlist's poster (icon),
+  background art and description.
+  - When you share, the sharer's custom poster, background and description go to everyone.
+    Existing shares adopt the owner's on their first round after updating.
+  - Afterwards, whoever changes one on their copy in Plex, it reaches everyone in the next
+    round. If two people change the same thing, the most recent change wins.
+  - Images are only downloaded and uploaded when one actually changes. Re-selecting the
+    same picture does nothing.
+  - Going back to Plex's automatic collage isn't synced (Plex's API doesn't support it well).
+- Shared playlist pages show the current poster and description.
+- Diagnostics show the raw artwork attributes Plex reports for a playlist.
+- An artwork or description problem is logged and never stops tracks syncing.
 
 ## 0.4.1 (2026-11-16)
 

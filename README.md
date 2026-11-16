@@ -9,7 +9,8 @@ the changes reach everyone.
 See [PLAN.md](PLAN.md) for the design.
 
 **Status: M3.** Sign in, share music playlists between Home users (merge, replace or keep
-separate), and keep them in sync automatically. Backups are taken before anything is removed.
+separate), and keep them in sync automatically: tracks, order, name, poster, background
+and description. Backups are taken before anything is removed.
 
 ## Install on Unraid
 
@@ -37,8 +38,8 @@ edit the container and set **Repository** to a release tag instead:
 
 | Tag | Updates |
 |---|---|
-| `ghcr.io/mayberts/syncalist:0.4` | Fixes within 0.4 (0.4.1, 0.4.2…) |
-| `ghcr.io/mayberts/syncalist:0.4.0` | Never; exactly this release |
+| `ghcr.io/mayberts/syncalist:0.5` | Fixes within 0.5 (0.5.1, 0.5.2…) |
+| `ghcr.io/mayberts/syncalist:0.5.0` | Never; exactly this release |
 
 Releases and what changed are listed in [CHANGELOG.md](CHANGELOG.md).
 

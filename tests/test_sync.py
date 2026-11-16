@@ -210,3 +210,88 @@ def test_addition_detected_even_if_plex_does_not_bump_updated_at(env, plex):
     plex.edit(CLEO_ID, keys[CLEO_ID], [1, 2, 3])  # and someone else changes something
     sync.sync_group(g)
     assert set(map(tuple, all_items(plex, keys).values())) == {(1, 2, 3, 9)}
+
+
+# -- artwork and description ------------------------------------------------------------------------
+
+def test_first_round_shares_owners_artwork_and_description(env, plex):
+    shares, sync = env
+    plex.set_image(ADMIN_ID, 11, "poster", b"OWNER-POSTER")
+    plex.set_image(ADMIN_ID, 11, "art", b"OWNER-ART")
+    plex.playlists[ADMIN_ID][11]["summary"] = "Songs for the car"
+    plex.set_image(KATE_ID, 253611, "poster", b"KATES-OLD-POSTER")  # merged/replaced copy had its own
+    g, keys = shared_road_trip(shares, plex)
+    sync.sync_group(g)
+    for uid, k in keys.items():
+        assert plex.image_of(uid, k, "poster") == b"OWNER-POSTER"
+        assert plex.image_of(uid, k, "art") == b"OWNER-ART"
+        assert plex.playlists[uid][k]["summary"] == "Songs for the car"
+    assert g.summary == "Songs for the car" and g.meta_initialized
+
+
+def test_poster_change_by_anyone_reaches_everyone_once(env, plex):
+    shares, sync = env
+    g, keys = shared_road_trip(shares, plex)
+    sync.sync_group(g)  # first round: owner has no custom artwork, nothing to do
+    assert getattr(plex, "uploads", 0) == 0
+    plex.set_image(CLEO_ID, keys[CLEO_ID], "poster", b"CLEOS-POSTER")
+    sync.sync_group(g)
+    assert {plex.image_of(uid, k, "poster") for uid, k in keys.items()} == {b"CLEOS-POSTER"}
+    assert any("Cleo set the poster" in e.message for e in shares.events(g))
+    uploads = plex.uploads
+    sync.sync_group(g)  # our own uploads aren't mistaken for new changes
+    sync.sync_group(g)
+    assert plex.uploads == uploads
+
+
+def test_newest_artwork_change_wins(env, plex):
+    shares, sync = env
+    g, keys = shared_road_trip(shares, plex)
+    sync.sync_group(g)
+    plex.set_image(KATE_ID, keys[KATE_ID], "art", b"KATE-ART")
+    plex.set_image(ADMIN_ID, 11, "art", b"NICK-ART")  # later
+    sync.sync_group(g)
+    assert {plex.image_of(uid, k, "art") for uid, k in keys.items()} == {b"NICK-ART"}
+
+
+def test_reselecting_the_same_picture_is_not_reuploaded(env, plex):
+    shares, sync = env
+    plex.set_image(ADMIN_ID, 11, "poster", b"SAME")
+    g, keys = shared_road_trip(shares, plex)
+    sync.sync_group(g)
+    uploads = plex.uploads
+    plex.set_image(KATE_ID, keys[KATE_ID], "poster", b"SAME")  # new path, same bytes
+    sync.sync_group(g)
+    assert plex.uploads == uploads
+
+
+def test_description_change_syncs(env, plex):
+    shares, sync = env
+    g, keys = shared_road_trip(shares, plex)
+    sync.sync_group(g)
+    plex.edit(KATE_ID, keys[KATE_ID])
+    plex.playlists[KATE_ID][keys[KATE_ID]]["summary"] = "Kate's road trip picks"
+    sync.sync_group(g)
+    assert {plex.playlists[uid][k]["summary"] for uid, k in keys.items()} == {"Kate's road trip picks"}
+    assert any("Kate changed the description" in e.message for e in shares.events(g))
+
+
+def test_new_member_gets_current_artwork(env, plex):
+    shares, sync = env
+    plex.set_image(ADMIN_ID, 10, "poster", b"MIX-POSTER")
+    g = shares.share(shares.session.get(HomeUser, ADMIN_ID), 10, {CLEO_ID: Mode.NEW})
+    sync.sync_group(g)
+    shares.add_members(g, {KATE_ID: Mode.NEW})
+    sync.sync_group(g)
+    kate_key = [m.playlist_key for m in shares.members(g) if m.user_id == KATE_ID][0]
+    assert plex.image_of(KATE_ID, kate_key, "poster") == b"MIX-POSTER"
+
+
+def test_artwork_failure_never_breaks_track_sync(env, plex, monkeypatch):
+    shares, sync = env
+    g, keys = shared_road_trip(shares, plex)
+    monkeypatch.setattr(FakeGateway, "playlist_meta", lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))
+    plex.edit(KATE_ID, keys[KATE_ID], [1, 2, 3, 4, 9])
+    sync.sync_group(g)
+    assert plex.items(ADMIN_ID, 11) == [1, 2, 3, 4, 9]
+    assert any("Couldn't sync artwork/description" in e.message for e in shares.events(g))

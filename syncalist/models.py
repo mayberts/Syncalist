@@ -61,6 +61,11 @@ class ShareGroup(SQLModel, table=True):
     last_synced_at: datetime | None = None
     # Set when a sync was held back for confirmation (e.g. it would remove many tracks).
     paused_reason: str | None = None
+    # Shared artwork and description. Images are identified by a hash of their bytes.
+    summary: str | None = None
+    poster_sha: str | None = None
+    art_sha: str | None = None
+    meta_initialized: bool | None = None  # False/None until the first artwork round
 
 
 class GroupMember(SQLModel, table=True):
@@ -76,6 +81,11 @@ class GroupMember(SQLModel, table=True):
     # member against this (not the group list), so skipped or not-yet-received tracks never
     # look like removals. None = unknown (older installs): fall back to the group list.
     last_known: list[int] | None = Field(default=None, sa_column=Column(JSON))
+    # Artwork/description as Plex reported them after our last artwork round (to spot changes).
+    last_poster: str | None = None
+    last_art: str | None = None
+    last_summary: str | None = None
+    meta_synced: bool | None = None
     status: str = "ok"  # ok | error
     status_detail: str | None = None
     joined_at: datetime = Field(default_factory=utcnow)

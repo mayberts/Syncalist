@@ -5,8 +5,8 @@ from fastapi.testclient import TestClient
 
 from syncalist.config import Config
 from syncalist.plex.auth import AccountInfo, Pin
-from syncalist.plex.gateway import (HomeUserInfo, MusicSection, PlaylistSummary, PlexError, RemovalRefused,
-                                    ServerInfo, TokenRejected, Track)
+from syncalist.plex.gateway import (HomeUserInfo, MusicSection, PlaylistMeta, PlaylistSummary, PlexError,
+                                    RemovalRefused, ServerInfo, TokenRejected, Track)
 from syncalist.sync import planner
 from syncalist.web.app import create_app
 
@@ -76,6 +76,20 @@ class FakePlex:
             pl["title"] = title
         pl["updated"] = self.tick()
 
+    def set_image(self, user_id, key, kind, data):
+        """Simulate someone choosing a custom poster/background in a Plex app."""
+        self.image_n = getattr(self, "image_n", 0) + 1
+        path = f"/library/metadata/{key}/{'thumb' if kind == 'poster' else 'art'}/{self.image_n}"
+        self.images = getattr(self, "images", {})
+        self.images[path] = data
+        self.playlists[user_id][key][kind] = path
+        self.playlists[user_id][key]["updated"] = self.tick()
+        return path
+
+    def image_of(self, user_id, key, kind):
+        path = self.playlists[user_id][key][kind]
+        return getattr(self, "images", {}).get(path) if path else None
+
     def tick(self):
         self.clock += timedelta(seconds=1)
         return self.clock
@@ -83,7 +97,8 @@ class FakePlex:
     def add_playlist(self, user_id, title, items, key=None, smart=False):
         key = key or self.next_key
         self.next_key = max(self.next_key, key) + 1
-        self.playlists[user_id][key] = {"title": title, "smart": smart, "items": list(items), "updated": self.tick()}
+        self.playlists[user_id][key] = {"title": title, "smart": smart, "items": list(items), "updated": self.tick(),
+                                        "poster": None, "art": None, "summary": ""}
         return key
 
     def items(self, user_id, key):
@@ -191,6 +206,25 @@ class FakeGateway:
     def rename_playlist(self, token, key, title):
         _, pl = self._pl(token, key)
         pl["title"] = title
+        pl["updated"] = self.plex.tick()
+
+    def playlist_meta(self, token, key):
+        _, pl = self._pl(token, key)
+        return PlaylistMeta(pl["poster"], pl["art"], pl["summary"])
+
+    def download_image(self, token, path):
+        self.plex.user_for_token(token)
+        self.plex.downloads = getattr(self.plex, "downloads", 0) + 1
+        return self.plex.images[path]
+
+    def upload_image(self, token, key, kind, data):
+        uid, _ = self._pl(token, key)
+        self.plex.uploads = getattr(self.plex, "uploads", 0) + 1
+        self.plex.set_image(uid, key, kind, data)
+
+    def set_summary(self, token, key, summary):
+        _, pl = self._pl(token, key)
+        pl["summary"] = summary
         pl["updated"] = self.plex.tick()
 
     def delete_playlist(self, token, key):

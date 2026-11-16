@@ -66,6 +66,15 @@ class PlaylistSummary:
 
 
 @dataclass(frozen=True)
+class PlaylistMeta:
+    """A playlist's artwork and description. Image values are Plex paths, or None when the
+    playlist uses its automatic collage (no custom image)."""
+    poster: str | None
+    art: str | None
+    summary: str
+
+
+@dataclass(frozen=True)
 class Track:
     key: int
     title: str
@@ -90,6 +99,10 @@ class Gateway(Protocol):
     def delete_playlist(self, user_token: str, playlist_key: int) -> None: ...
     def rename_playlist(self, user_token: str, playlist_key: int, title: str) -> None: ...
     def tracks_info(self, track_keys: list[int]) -> list[Track]: ...
+    def playlist_meta(self, user_token: str, playlist_key: int) -> PlaylistMeta: ...
+    def download_image(self, user_token: str, path: str) -> bytes: ...
+    def upload_image(self, user_token: str, playlist_key: int, kind: str, data: bytes) -> None: ...
+    def set_summary(self, user_token: str, playlist_key: int, summary: str) -> None: ...
 
 
 def _wrap(fn):
@@ -274,6 +287,32 @@ class PlexApiGateway:
             out += [_track(t) for t in self.admin_server.fetchItems(f"/library/metadata/{chunk}")]
         return out
 
+    @_wrap
+    def playlist_meta(self, user_token: str, playlist_key: int) -> PlaylistMeta:
+        attrib = self._user_server(user_token).query(f"/playlists/{playlist_key}")[0].attrib
+        return PlaylistMeta(poster=_custom_image(attrib.get("thumb"), attrib),
+                            art=_custom_image(attrib.get("art"), attrib),
+                            summary=attrib.get("summary") or "")
+
+    @_wrap
+    def download_image(self, user_token: str, path: str) -> bytes:
+        srv = self._user_server(user_token)
+        r = srv._session.get(srv.url(path, includeToken=True), timeout=TIMEOUT)
+        if r.status_code != 200 or not r.content:
+            raise PlexError(f"Couldn't download image ({r.status_code})")
+        return r.content
+
+    @_wrap
+    def upload_image(self, user_token: str, playlist_key: int, kind: str, data: bytes) -> None:
+        """kind: "poster" or "art". Plex selects the uploaded image."""
+        endpoint = {"poster": "posters", "art": "arts"}[kind]
+        srv = self._user_server(user_token)
+        srv.query(f"/library/metadata/{playlist_key}/{endpoint}", method=srv._session.post, data=data)
+
+    @_wrap
+    def set_summary(self, user_token: str, playlist_key: int, summary: str) -> None:
+        self._fetch_playlist(user_token, playlist_key).editSummary(summary)
+
     def debug_playlist(self, user_token: str, playlist_key: int) -> dict:
         """Read-only: every way of counting a playlist's tracks, to find where they disagree."""
         srv = self._user_server(user_token)
@@ -292,6 +331,10 @@ class PlexApiGateway:
                             "updatedAt": str(p.updatedAt)}
             return None
         attempt("listing", listing)
+        attempt("artwork attributes", lambda: {
+            k: srv.query(f"/playlists/{playlist_key}")[0].attrib.get(k)
+            for k in ("thumb", "art", "composite", "summary")})
+        attempt("artwork as Syncalist sees it", lambda: vars(self.playlist_meta(user_token, playlist_key)))
 
         def by_key():
             pl = srv.fetchItem(playlist_key)
@@ -403,6 +446,13 @@ class PlexApiGateway:
     def _fresh_items(srv: PlexServer, pl: Playlist) -> list:
         """The playlist's items, read from the server (plexapi caches pl.items())."""
         return srv.fetchItems(f"{pl.key}/items")
+
+
+def _custom_image(path: str | None, attrib: dict) -> str | None:
+    """A custom image path, or None if the playlist shows Plex's automatic collage."""
+    if not path or "/composite/" in path or path == attrib.get("composite"):
+        return None
+    return path
 
 
 def _join(args: dict) -> str:

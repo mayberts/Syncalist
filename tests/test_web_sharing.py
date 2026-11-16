@@ -217,3 +217,18 @@ def test_retention_setting_prunes_old_entries(configured):
     with Session(configured.app.state.engine) as s:
         msgs = {e.message for e in s.exec(select(SyncEvent)).all()}
     assert "ancient" not in msgs and "recent" in msgs
+
+
+def test_share_applies_owner_artwork_and_page_shows_it(configured, plex):
+    plex.set_image(ADMIN_ID, 10, "poster", b"\x89PNG-poster")
+    plex.playlists[ADMIN_ID][10]["summary"] = "Nick's mix"
+    gid = configured.post("/share", data={"user_id": ADMIN_ID, "playlist_key": 10,
+                                          "recipient": CLEO_ID}).headers["location"]
+    cleo_key = [k for k, p in plex.playlists[CLEO_ID].items() if p["title"] == "Admin Mix"][0]
+    assert plex.image_of(CLEO_ID, cleo_key, "poster") == b"\x89PNG-poster"  # applied at share time
+    assert plex.playlists[CLEO_ID][cleo_key]["summary"] == "Nick's mix"
+    page = configured.get(gid).text
+    assert f'src="{gid}/image/poster"' in page and "Nick&#39;s mix" in page
+    img = configured.get(f"{gid}/image/poster")
+    assert img.status_code == 200 and img.headers["content-type"] == "image/png" and img.content == b"\x89PNG-poster"
+    assert configured.get(f"{gid}/image/art").status_code == 404

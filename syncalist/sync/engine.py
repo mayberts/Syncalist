@@ -10,6 +10,7 @@ One round for a group:
      again during the round (they're picked up next round instead). Every write is read back.
 """
 
+import hashlib
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -131,6 +132,8 @@ class SyncService:
             # just have their state recorded; _write_member only writes if a copy differs.
             for mid in read_ids - blocked:
                 self._write_member(group, *seen[mid], current[mid])
+            if self._sync_meta(group, seen, blocked):
+                report.changed = True
             group.last_synced_at = utcnow()
             self.session.add(group)
             self.session.commit()
@@ -161,6 +164,7 @@ class SyncService:
             if mid in blocked:
                 continue
             self._write_member(group, m, user, summary, current[mid], prev=prevs.get(mid))
+        self._sync_meta(group, seen, blocked)  # after track writes, so it can't look like a mid-round edit
         group.last_synced_at = utcnow()
         self.session.add(group)
         self.session.commit()
@@ -251,6 +255,89 @@ class SyncService:
             m.status, m.status_detail = "ok", None
         self.session.add(m)
         self.session.commit()
+
+    # -- artwork and description -----------------------------------------------------------------------------
+    def _sync_meta(self, group: ShareGroup, seen: dict, blocked: set[int]) -> bool:
+        """Share the poster, background art and description. The newest change wins. On a group's
+        first artwork round the owner's are used. Never breaks the track sync: failures are logged."""
+        try:
+            return self._sync_meta_inner(group, seen, blocked)
+        except Exception as e:  # noqa: BLE001 - artwork must never break the track sync
+            self.session.rollback()
+            self.shares._log(group, f"Couldn't sync artwork/description: {type(e).__name__}: {e}", level="warning")
+            return False
+
+    def _sync_meta_inner(self, group: ShareGroup, seen: dict, blocked: set[int]) -> bool:
+        members = [(m, u, s) for mid, (m, u, s) in seen.items() if mid not in blocked]
+        if not members:
+            return False
+        metas = {m.id: self.users.call_as(u, lambda t: self.gateway.playlist_meta(t, m.playlist_key))
+                 for m, u, _ in members}
+        newest_first = sorted(members, key=lambda x: (x[2].updated_at is not None, x[2].updated_at), reverse=True)
+
+        if not group.meta_initialized:
+            # First round for this share: the owner's artwork and description win.
+            owner = [x for x in members if x[0].user_id == group.owner_user_id] or newest_first[:1]
+            om = owner[0][0]
+            sources = {"poster": owner[0] if metas[om.id].poster else None,
+                       "art": owner[0] if metas[om.id].art else None,
+                       "summary": owner[0] if metas[om.id].summary else None}
+        else:
+            def changed(field, last):
+                return next((x for x in newest_first if x[0].meta_synced
+                             and getattr(metas[x[0].id], field) != getattr(x[0], last)
+                             and (field == "summary" or getattr(metas[x[0].id], field))), None)
+            sources = {"poster": changed("poster", "last_poster"), "art": changed("art", "last_art"),
+                       "summary": changed("summary", "last_summary")}
+
+        touched = False
+        for kind, sha_field in (("poster", "poster_sha"), ("art", "art_sha")):
+            src = sources[kind]
+            data = None
+            if src is not None:
+                m, u, _ = src
+                data = self.users.call_as(u, lambda t: self.gateway.download_image(t, getattr(metas[m.id], kind)))
+                sha = hashlib.sha256(data).hexdigest()
+                if sha == getattr(group, sha_field):
+                    src = None  # same picture re-selected: nothing to share
+                else:
+                    setattr(group, sha_field, sha)
+                    what = "poster" if kind == "poster" else "background"
+                    self.shares._log(group, f"{u.title} {'set' if group.meta_initialized else 'shared'} the {what}", u)
+            # Who needs it: everyone else on a change; otherwise only members who never got it.
+            targets = [x for x in members if (src is not None and x[0].id != src[0].id)
+                       or (src is None and not x[0].meta_synced and getattr(group, sha_field))]
+            if targets and data is None:
+                holder = next((x for x in members if x[0].meta_synced and getattr(metas[x[0].id], kind)), None)
+                if holder is None:
+                    continue
+                data = self.users.call_as(holder[1], lambda t: self.gateway.download_image(
+                    t, getattr(metas[holder[0].id], kind)))
+            for m, u, _ in targets:
+                self.users.call_as(u, lambda t: self.gateway.upload_image(t, m.playlist_key, kind, data))
+                touched = True
+
+        src = sources["summary"]
+        if src is not None and metas[src[0].id].summary != (group.summary or ""):
+            group.summary = metas[src[0].id].summary
+            self.shares._log(group, f"{src[1].title} changed the description" if group.meta_initialized
+                             else f"{src[1].title} shared the description", src[1])
+        if group.summary is not None:
+            for m, u, _ in members:
+                if metas[m.id].summary != group.summary:
+                    self.users.call_as(u, lambda t: self.gateway.set_summary(t, m.playlist_key, group.summary))
+                    touched = True
+
+        # Record what each copy now reports, so the next round only reacts to new changes.
+        for m, u, _ in members:
+            meta = self.users.call_as(u, lambda t: self.gateway.playlist_meta(t, m.playlist_key)) \
+                if touched else metas[m.id]
+            m.last_poster, m.last_art, m.last_summary, m.meta_synced = meta.poster, meta.art, meta.summary, True
+            self.session.add(m)
+        group.meta_initialized = True
+        self.session.add(group)
+        self.session.commit()
+        return touched
 
     def _member_error(self, group: ShareGroup, m: GroupMember, user: HomeUser, message: str) -> None:
         if m.status_detail != message:  # don't repeat the same error every round

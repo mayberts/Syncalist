@@ -7,7 +7,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Form, Request
+from fastapi import Depends, FastAPI, Form, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -445,8 +445,13 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
         recipients = parse_recipients(form)
         shares = share_service(session, settings)
         owner = session.get(HomeUser, user_id)
+        def share_and_sync():
+            with sync_lock:
+                group = shares.share(owner, playlist_key, recipients)
+                SyncService(shares).sync_group(group)  # shares the owner's artwork and description now
+                return group
         try:
-            group = await run_in_threadpool(shares.share, owner, playlist_key, recipients)
+            group = await run_in_threadpool(share_and_sync)
         except (ShareError, UserNeedsAttention, PlexError) as e:
             flash(request, str(e), "error")
             return RedirectResponse(f"/share?user_id={user_id}&playlist_key={playlist_key}", status_code=303)
@@ -482,9 +487,33 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
                 pass
         member_ids = {r["user"].id for r in rows}
         candidates = shares.candidates(group.name, exclude_user_ids=member_ids)
+        has_poster = any(r["member"].last_poster for r in rows)
+        has_art = any(r["member"].last_art for r in rows)
         return render(request, "group.html", group=group, rows=rows, skipped_info=skipped_info,
+                      has_poster=has_poster, has_art=has_art,
                       candidates=candidates, events=group_events(shares.events(group, limit=30)),
                       owner=session.get(HomeUser, group.owner_user_id))
+
+    @app.get("/groups/{group_id}/image/{kind}")
+    def group_image(group_id: int, kind: str, session: Session = Depends(db),
+                    settings: AppSettings = Depends(require_admin)):
+        """The shared poster/background, fetched from a member's copy (Plex images need a token)."""
+        group = session.get(ShareGroup, group_id)
+        field = {"poster": "last_poster", "art": "last_art"}.get(kind)
+        if group is None or field is None:
+            return Response(status_code=404)
+        shares = share_service(session, settings)
+        for m in shares.members(group):
+            path = getattr(m, field)
+            if path:
+                user = session.get(HomeUser, m.user_id)
+                try:
+                    data = shares.users.call_as(user, lambda t: shares.gateway.download_image(t, path))
+                except (UserNeedsAttention, PlexError):
+                    continue
+                media = "image/png" if data[:4] == b"\x89PNG" else "image/jpeg"
+                return Response(data, media_type=media, headers={"Cache-Control": "private, max-age=300"})
+        return Response(status_code=404)
 
     @app.post("/groups/{group_id}/members")
     async def group_add(request: Request, group_id: int, session: Session = Depends(db),
@@ -493,8 +522,13 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
         group = session.get(ShareGroup, group_id)
         if group is None:
             return RedirectResponse("/", status_code=303)
+        def add_and_sync():
+            with sync_lock:
+                shares = share_service(session, settings)
+                shares.add_members(group, parse_recipients(form))
+                SyncService(shares).sync_group(group)  # gives new people the current artwork
         try:
-            await run_in_threadpool(share_service(session, settings).add_members, group, parse_recipients(form))
+            await run_in_threadpool(add_and_sync)
             flash(request, "Updated the shared playlist.", "success")
         except (ShareError, UserNeedsAttention, PlexError) as e:
             flash(request, str(e), "error")

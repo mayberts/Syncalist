@@ -133,3 +133,12 @@ def test_read_all_keys_pages_through_large_playlists():
 def test_read_all_keys_detects_missing_items():
     with pytest.raises(Exception, match="returned 841 of 900"):
         PlexApiGateway._read_all_keys(PagedServer(841, cap=1000, lie_total=900), 5)
+
+
+def test_custom_image_detection():
+    from syncalist.plex.gateway import _custom_image
+    comp = {"composite": "/playlists/5/composite/1700000000"}
+    assert _custom_image(None, comp) is None
+    assert _custom_image("/playlists/5/composite/1700000000", comp) is None  # Plex's automatic collage
+    assert _custom_image("/library/metadata/5/thumb/1700000123", comp) == "/library/metadata/5/thumb/1700000123"
+    assert _custom_image("/library/metadata/5/art/1700000456", comp) == "/library/metadata/5/art/1700000456"

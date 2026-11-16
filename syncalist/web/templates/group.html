@@ -3,9 +3,14 @@
 {% block content %}
 <p><a href="/">← All playlists</a></p>
 <div class="pagehead">
-  <div>
+  <div class="grouphead">
+    {% if has_poster %}<img class="poster" src="/groups/{{ group.id }}/image/poster" alt="Playlist poster" width="96" height="96">{% endif %}
+    <div>
     <h1>{{ group.name }} <span class="tag">shared</span></h1>
     <p class="muted">{{ group.base_snapshot|length }} tracks · shared by {{ owner.title if owner else "unknown" }} {{ group.created_at|ago }} · last synced {{ group.last_synced_at|ago }}</p>
+    {% if group.summary %}<p class="summary">{{ group.summary }}</p>{% endif %}
+    <p class="hint">Poster, background and description are shared too: change them on any copy in Plex{% if has_art %} (<a href="/groups/{{ group.id }}/image/art" target="_blank">view background</a>){% endif %}.</p>
+    </div>
   </div>
   <div class="actions">
     <form method="post" action="/groups/{{ group.id }}/sync"><button class="primary">Sync now</button></form>
