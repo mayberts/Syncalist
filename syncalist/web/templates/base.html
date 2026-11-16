@@ -5,11 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Syncalist{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/static/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/static/site.webmanifest">
+  <meta name="theme-color" content="#e5a00d">
   {% block head %}{% endblock %}
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/">Syncalist</a>
+    <a class="brand" href="/"><img src="/static/logo-small.svg" width="28" height="28" alt=""> Syncalist</a>
     {% if signed_in %}
     <nav>
       <a href="/">Playlists{% if attention %} <span class="badge" title="{{ attention }} shared playlist{{ 's' if attention != 1 }} need{{ 's' if attention == 1 }} attention">{{ attention }}</span>{% endif %}</a>

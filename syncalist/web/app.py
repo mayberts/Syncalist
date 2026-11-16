@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Engine
@@ -153,6 +153,10 @@ def create_app(config: Config | None = None, *, gateway_factory: GatewayFactory 
         return RedirectResponse(exc.url, status_code=303)
 
     # -- health ----------------------------------------------------------------------
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon():
+        return FileResponse(HERE / "static" / "favicon.ico", media_type="image/x-icon")
+
     @app.get("/healthz")
     def healthz():
         return JSONResponse({"status": "ok", "version": __version__})

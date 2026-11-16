@@ -10,7 +10,7 @@
   <Overview>Keeps Plex Home music playlists in sync between users. The Plex Home admin chooses which playlists are shared and with whom, then any member can edit their copy and the changes reach everyone. Sign in with the Plex account that owns the server.</Overview>
   <Category>MediaServer:Music Tools:</Category>
   <WebUI>http://[IP]:[PORT:8585]/</WebUI>
-  <Icon>https://raw.githubusercontent.com/mayberts/Syncalist/claude/vibrant-fermi-feca8d/unraid/icon.png</Icon>
+  <Icon>https://raw.githubusercontent.com/mayberts/Syncalist/HEAD/unraid/icon.png</Icon>
   <ExtraParams>--restart unless-stopped</ExtraParams>
   <Config Name="Web UI port" Target="8585" Default="8585" Mode="tcp" Description="Port for the Syncalist web interface." Type="Port" Display="always" Required="true" Mask="false">8585</Config>
   <Config Name="Config" Target="/config" Default="/mnt/user/appdata/syncalist" Mode="rw" Description="Database and encryption key. Back up both files together." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/syncalist</Config>

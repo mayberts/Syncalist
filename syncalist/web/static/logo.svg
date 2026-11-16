@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Syncalist">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f7b733"/>
+      <stop offset="1" stop-color="#e3820f"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <path d="M96.3,197.9 A170,170 0 0 1 391.6,153.5" fill="none" stroke="#1d1a16" stroke-width="30" stroke-linecap="round"/><path d="M418.3,205.4 L416.6,124.6 L358.5,172.1 Z" fill="#1d1a16" stroke="#1d1a16" stroke-width="10.5" stroke-linejoin="round"/><path d="M415.7,314.1 A170,170 0 0 1 120.4,358.5" fill="none" stroke="#1d1a16" stroke-width="30" stroke-linecap="round"/><path d="M93.7,306.6 L95.4,387.4 L153.5,339.9 Z" fill="#1d1a16" stroke="#1d1a16" stroke-width="10.5" stroke-linejoin="round"/>
+  <line x1="166.0" y1="198.0" x2="284.0" y2="198.0" stroke="#1d1a16" stroke-width="22.0" stroke-linecap="round"/><line x1="166.0" y1="244.0" x2="284.0" y2="244.0" stroke="#1d1a16" stroke-width="22.0" stroke-linecap="round"/><line x1="166.0" y1="290.0" x2="232.0" y2="290.0" stroke="#1d1a16" stroke-width="22.0" stroke-linecap="round"/><ellipse cx="290.0" cy="318.0" rx="30.0" ry="24.0" transform="rotate(-20 290.0 318.0)" fill="#1d1a16"/><rect x="305.0" y="174.0" width="17.0" height="146.0" rx="8.0" fill="#1d1a16"/><path d="M314.0,174.0 C346.0,182.0 358.0,204.0 346.0,236.0 C344.0,212.0 332.0,204.0 314.0,202.0 Z" fill="#1d1a16"/>
+</svg>

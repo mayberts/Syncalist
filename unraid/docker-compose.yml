@@ -13,3 +13,7 @@ services:
       - PUID=99                                # nobody
       - PGID=100                               # users
     restart: unless-stopped
+    labels:
+      # Unraid's Docker page uses these for the icon and the WebUI menu item.
+      net.unraid.docker.icon: https://raw.githubusercontent.com/mayberts/Syncalist/HEAD/unraid/icon.png
+      net.unraid.docker.webui: http://[IP]:[PORT:8585]/

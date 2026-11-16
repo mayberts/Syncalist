@@ -13,6 +13,11 @@ COPY syncalist ./syncalist
 RUN pip install --no-cache-dir . && mkdir -p /config
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
+LABEL net.unraid.docker.icon="https://raw.githubusercontent.com/mayberts/Syncalist/HEAD/unraid/icon.png" \
+      net.unraid.docker.webui="http://[IP]:[PORT:8585]/" \
+      org.opencontainers.image.title="Syncalist" \
+      org.opencontainers.image.description="Share and sync music playlists between Plex Home users"
+
 VOLUME /config
 EXPOSE 8585
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \

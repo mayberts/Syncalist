@@ -1,3 +1,5 @@
+<p align="center"><img src="branding/logo.svg" width="128" height="128" alt="Syncalist logo"></p>
+
 # Syncalist
 
 Keeps music playlists in sync between the users of a Plex Home. The Home admin picks
@@ -16,7 +18,7 @@ The image is published to `ghcr.io/mayberts/syncalist:latest` by GitHub Actions 
 1. On the Unraid server, copy the template into the user templates folder (from the Unraid terminal):
    ```bash
    wget -O /boot/config/plugins/dockerMan/templates-user/my-syncalist.xml \
-     https://raw.githubusercontent.com/mayberts/Syncalist/claude/vibrant-fermi-feca8d/unraid/syncalist.xml
+     https://raw.githubusercontent.com/mayberts/Syncalist/HEAD/unraid/syncalist.xml
    ```
 2. **Docker** tab → **Add Container** → choose **syncalist** from the *Template* list.
 3. Check the Plex URL, then **Apply**.
@@ -88,3 +90,9 @@ The build sees a version that hasn't been published yet, publishes `X.Y.Z` and `
 alongside `latest`, and creates the `vX.Y.Z` git tag. Pushes that don't change the version
 only update `latest`. (Pushing a `vX.Y.Z` tag yourself also works; the build fails if it
 doesn't match `__version__`.)
+
+## Logo
+
+The logo is generated from `branding/make_logo.py`. Run `branding/build_assets.sh` to regenerate
+the favicon, app icons, Unraid icon and `branding/social-preview.png` (needs Node with Playwright
+and Python with Pillow).

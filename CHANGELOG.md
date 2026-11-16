@@ -3,6 +3,18 @@
 Docker images: `ghcr.io/mayberts/syncalist:<version>`. `latest` follows the main branch;
 `0.4` follows the newest 0.4.x release; `0.4.0` never changes.
 
+## 0.4.1 (2026-11-16)
+
+- New logo: a playlist inside two sync arrows, on amber. A simplified version is used at
+  favicon sizes.
+- Favicon (SVG, PNG and multi-size `.ico`), phone home-screen icons and a web manifest.
+- Logo in the web interface header.
+- Unraid: new container icon. The template and the image's `net.unraid.docker.icon` and
+  `net.unraid.docker.webui` labels point at it, so Docker Compose containers get the icon
+  and the WebUI link too.
+- `branding/` holds the SVG sources, a script to regenerate every asset, and a GitHub
+  social preview image.
+
 ## 0.4.0 (2026-11-16)
 
 - **History** page replaces Backups in the menu: activity and backups together.

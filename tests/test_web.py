@@ -137,3 +137,13 @@ def test_setup_rejected_token_message_is_short(client, plex, app):
         assert r.status_code == 400 and "refused this account" in r.text and "&lt;html" not in r.text
     finally:
         conftest.FakeGateway.server_info = orig
+
+
+def test_icons_are_served_and_linked(client):
+    assert client.get("/favicon.ico").headers["content-type"] == "image/x-icon"
+    for path in ("/static/favicon.svg", "/static/logo.svg", "/static/apple-touch-icon.png",
+                 "/static/icon-192.png", "/static/icon-512.png", "/static/site.webmanifest"):
+        assert client.get(path).status_code == 200, path
+    page = client.get("/login").text
+    assert 'rel="icon" href="/static/favicon.svg"' in page and 'rel="manifest"' in page
+    assert '<img src="/static/logo-small.svg"' in page
