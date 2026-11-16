@@ -82,10 +82,9 @@ The tests use a fake Plex server, so no real server is needed.
 ## Releasing
 
 1. Set the new version in `syncalist/__init__.py` and add a section to `CHANGELOG.md`.
-2. Commit and push.
-3. Tag and push the tag; the build publishes `X.Y.Z` and `X.Y` images (it fails if the tag
-   doesn't match `__version__`):
-   ```bash
-   git tag -a v0.2.0 -m "Syncalist 0.2.0"
-   git push origin v0.2.0
-   ```
+2. Commit and push to the main branch.
+
+The build sees a version that hasn't been published yet, publishes `X.Y.Z` and `X.Y` images
+alongside `latest`, and creates the `vX.Y.Z` git tag. Pushes that don't change the version
+only update `latest`. (Pushing a `vX.Y.Z` tag yourself also works; the build fails if it
+doesn't match `__version__`.)
