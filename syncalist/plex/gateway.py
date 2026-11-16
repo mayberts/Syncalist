@@ -280,6 +280,10 @@ class PlexApiGateway:
                                "playlistItemID": getattr(i, "playlistItemID", None)} for i in items[:5]]}
         attempt("items()", lambda: summarise(srv.fetchItem(playlist_key).items()))
         attempt("fetchItems(/items)", lambda: summarise(srv.fetchItems(f"/playlists/{playlist_key}/items")))
+        if user_token != self._admin_token:
+            # The admin isn't subject to content restrictions, so this shows what's really in it.
+            attempt("items() as admin (unrestricted)",
+                    lambda: summarise(self.admin_server.fetchItems(f"/playlists/{playlist_key}/items")))
 
         def raw():
             data = srv.query(f"/playlists/{playlist_key}/items",
