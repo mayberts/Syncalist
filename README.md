@@ -28,6 +28,18 @@ If the repository is private, the image is private too. Either make the package 
 (GitHub → your profile → **Packages** → *syncalist* → **Package settings** → **Change visibility**),
 or sign in on Unraid first: `docker login ghcr.io -u mayberts` with a personal access token that has `read:packages`.
 
+### Pinning a version
+
+The template uses `latest`, which updates whenever new code is pushed. To update only when you choose,
+edit the container and set **Repository** to a release tag instead:
+
+| Tag | Updates |
+|---|---|
+| `ghcr.io/mayberts/syncalist:0.2` | Fixes within 0.2 (0.2.1, 0.2.2…) |
+| `ghcr.io/mayberts/syncalist:0.2.0` | Never; exactly this release |
+
+Releases and what changed are listed in [CHANGELOG.md](CHANGELOG.md).
+
 ## Run with Docker
 
 ```bash
@@ -66,3 +78,14 @@ pytest
 ```
 
 The tests use a fake Plex server, so no real server is needed.
+
+## Releasing
+
+1. Set the new version in `syncalist/__init__.py` and add a section to `CHANGELOG.md`.
+2. Commit and push.
+3. Tag and push the tag; the build publishes `X.Y.Z` and `X.Y` images (it fails if the tag
+   doesn't match `__version__`):
+   ```bash
+   git tag -a v0.2.0 -m "Syncalist 0.2.0"
+   git push origin v0.2.0
+   ```

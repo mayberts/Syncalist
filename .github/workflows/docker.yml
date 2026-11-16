@@ -24,6 +24,15 @@ jobs:
           python-version: "3.13"
       - run: pip install -e ".[dev]"
       - run: pytest -q
+      - name: Tag must match the app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          app=$(python -c "import syncalist; print(syncalist.__version__)")
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$app" != "$tag" ]; then
+            echo "::error::Tag v$tag doesn't match syncalist.__version__ ($app). Bump the version first."
+            exit 1
+          fi
 
   image:
     needs: test
